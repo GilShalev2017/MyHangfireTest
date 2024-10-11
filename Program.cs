@@ -13,14 +13,15 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Text;
 using HangfireTest.Utility;
 using System.Globalization;
-using System.Net;
+using System.Collections.Concurrent;
 
 public class Program
 {
     // Directory to store files
-    static string inputFilesDirectory = @"C:\Development\HangfireTest\Media\Record";
-
+    private static string inputFilesDirectory = @"C:\Development\HangfireTest\Media\Record";    
+    private static List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
     private static readonly Dictionary<string, string> languageIds = new();
+
     public static async Task Main(string[] args)
     {
         var app = CreateApplicationWithHangfire(args);
@@ -37,6 +38,15 @@ public class Program
         });
 
         app.Run();
+    }
+    public static void StopWatching()
+    {
+        foreach (var watcher in watchers)
+        {
+            watcher.EnableRaisingEvents = false;
+            watcher.Dispose();
+            Console.WriteLine($"Stopped and disposed watcher for path: {watcher.Path}");
+        }
     }
     private static WebApplication CreateApplicationWithHangfire(string[] args)
     {
@@ -92,11 +102,17 @@ public class Program
     {
         string logMessage = $"Processing media rule:\n" +
                             $"- Name: {jobRequest.Name}\n" +
+                            $"- IsRealTime: {jobRequest.IsRealTime}\n" +
                             $"- IsRecurring: {jobRequest.IsRecurring}\n" +
+                            $"- ExecutionTime: {jobRequest.ExecutionTime}\n" +
+                            $"- CronExpression: {jobRequest.CronExpression}\n" +
                             $"- Channels: {string.Join(", ", jobRequest.Channels)}\n" +
                             $"- StartTime: {jobRequest.StartTime}\n" +
                             $"- EndTime: {jobRequest.EndTime}\n" +
-                            $"- Keywords: {string.Join(", ", jobRequest.Keywords ?? new List<string>())}";
+                            $"- Keywords: {string.Join(", ", jobRequest.Keywords ?? new List<string>())}\n" +
+                            $"- JobTypes: {string.Join(", ", jobRequest.JobTypes ?? new List<string>())}\n" +
+                            $"- ExpectedAudioLanguage: {jobRequest.ExpectedAudioLanguage}\n" +
+                            $"- TranslationLanguages: {string.Join(", ", jobRequest.TranslationLanguages ?? new List<string>())}";
 
         Console.WriteLine(logMessage);
     }
@@ -221,8 +237,7 @@ public class Program
 
                     if (!File.Exists(mp3File))
                     {
-                        // Convert .mp4 to .mp3
-                        mp3File = await ExtractAudioAsync(file);
+                        mp3File = await ExtractAudioAsync(file);// Convert .mp4 to .mp3
 
                         if (!IsExtractionSucceeded(mp3File)) // it fails if result .mp3 is less than 5MB
                             return;
@@ -230,9 +245,7 @@ public class Program
 
                     if (!File.Exists(sttJsonFile)) // Transcribe only if the json file doesn't exist
                     {
-                        InsightResult insightResult = await TranscribeFileAsync(mp3File);
-
-                        await SaveTranscriptionResultAsync(insightResult, sttJsonFile);
+                        InsightResult insightResult = await TranscribeFileAsync(mp3File, sttJsonFile);
 
                         if (jobRequest.JobTypes.Contains(JobType.KeywordsDetection))
                         {
@@ -241,7 +254,7 @@ public class Program
 
                         if (jobRequest.JobTypes.Contains(JobType.Translation))
                         {
-                            await RunTranslation(jobRequest, channel, insightResult);
+                            await RunTranslation(jobRequest, channel, insightResult, sttJsonFile);
                         }
                     }
                 }
@@ -265,13 +278,11 @@ public class Program
         // Convert the endTime from string to DateTime and add 6 minutes
         DateTime endTime = DateTime.ParseExact(jobRequest.EndTime, "yyyy_MM_dd_HH_mm_ss", CultureInfo.InvariantCulture).AddMinutes(6);
 
-        List<FileSystemWatcher> watchers = new();
-
         foreach (var channel in jobRequest.Channels)
         {
             string channelPath = Path.Combine(inputFilesDirectory, channel);
 
-            FileSystemWatcher watcher = new FileSystemWatcher
+            FileSystemWatcher watcher = new()
             {
                 Path = channelPath,
                 Filter = "*.mp4",
@@ -279,7 +290,12 @@ public class Program
                 IncludeSubdirectories = true
             };
 
-            watcher.Created += async (sender, e) => await OnNewFileCreated(e.FullPath, jobRequest, channel);
+            watcher.Created += async (sender, e) =>
+            {
+                Console.WriteLine($"New file detected: {e.FullPath} at {DateTime.Now}");
+                await OnNewFileCreated(e.FullPath, jobRequest, channel);
+            }; 
+
             watcher.EnableRaisingEvents = true;
 
             watchers.Add(watcher);
@@ -293,14 +309,23 @@ public class Program
     }
     private static async Task OnNewFileCreated(string filePath, JobRequest jobRequest, string channel)
     {
-       Console.WriteLine($"Detected nwe file: {filePath}");
+        try
+        {
+            Console.WriteLine($"[OnNewFileCreated] File detected: {filePath} at {DateTime.Now}");
 
-        //Wait until the file is fully written to disk before processing it
-        await WaitForFileReady(filePath);
+            // Wait until the file is ready for processing
+            Console.WriteLine($"[OnNewFileCreated] Waiting for file to be ready: {filePath}");
 
-        Console.WriteLine($"File is now ready for processing: {filePath}");
+            await WaitForFileReady(filePath);
 
-        await ProcessFileAsync(filePath, jobRequest, channel);
+            Console.WriteLine($"[OnNewFileCreated] File is ready: {filePath}");
+
+            await ProcessFileAsync(filePath, jobRequest, channel);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[OnNewFileCreated] Error processing file {filePath}: {ex.Message}");
+        }
     }
     private static async Task WaitForFileReady(string filePath)
     {
@@ -339,27 +364,59 @@ public class Program
     {
         try
         {
+            var stopwatch = Stopwatch.StartNew();
+
             var mp3File = await ExtractAudioAsync(mp4FilePath);
 
-            InsightResult insightResult = await TranscribeFileAsync(mp3File);
+            Console.WriteLine($"Audio extraction took: {stopwatch.Elapsed.TotalSeconds} seconds");
 
             var sttFile = mp3File.Replace(".mp3", ".json");
 
-            await SaveTranscriptionResultAsync(insightResult, sttFile);
+            InsightResult insightResult = await TranscribeFileAsync(mp3File, sttFile);
 
+            Console.WriteLine($"Transcription took: {stopwatch.Elapsed.TotalSeconds} seconds");
+
+            //Sync invocation first RunKeywordsDetection and then RunTranslation
+            /*
             if (jobRequest.JobTypes.Contains(JobType.KeywordsDetection))
             {
                 await RunKeywordsDetection(jobRequest, insightResult, channel, sttFile);
+
+                Console.WriteLine($"Keyword detection took: {stopwatch.Elapsed.TotalSeconds} seconds");
+
             }
 
             if (jobRequest.JobTypes.Contains(JobType.Translation))
             {
-                await RunTranslation(jobRequest, channel, insightResult);
+                await RunTranslation(jobRequest, channel, insightResult, sttFile);
+
+                Console.WriteLine($"Translation took: {stopwatch.Elapsed.TotalSeconds} seconds");
             }
+            */
+            //parallelized invocation of RunKeywordsDetection and an RunTranslation
+            if (jobRequest.JobTypes.Contains(JobType.KeywordsDetection) && jobRequest.JobTypes.Contains(JobType.Translation))
+            {
+                await Task.WhenAll(
+                    RunKeywordsDetection(jobRequest, insightResult, channel, sttFile),
+                    RunTranslation(jobRequest, channel, insightResult, sttFile)
+                );
+            }
+            else if (jobRequest.JobTypes.Contains(JobType.KeywordsDetection))
+            {
+                await RunKeywordsDetection(jobRequest, insightResult, channel, sttFile);
+            }
+            else if (jobRequest.JobTypes.Contains(JobType.Translation))
+            {
+                await RunTranslation(jobRequest, channel, insightResult, sttFile);
+            }
+
+            stopwatch.Stop();
+            Console.WriteLine($"Total processing time for {mp4FilePath}: {stopwatch.Elapsed.TotalSeconds} seconds");
         }
         catch  (Exception ex) 
-        { 
-            Console.WriteLine($"Error processing {mp4FilePath}: {ex.Message}");
+        {
+            Console.WriteLine($"[ProcessFileAsync] Error processing {mp4FilePath}: {ex.Message}");
+            Console.WriteLine($"[ProcessFileAsync] Stack Trace: {ex.StackTrace}");
         }
     }
     private static async Task MixJobProcessing(JobRequest jobRequest)
@@ -493,8 +550,9 @@ public class Program
     }
     private static async Task<string> ExtractAudioAsync(string videoFilePath)
     {
-        // Replace the file extension from .mp4 to .mp3
         var audioFilePath = videoFilePath.Replace(".mp4", ".mp3");
+
+        Console.WriteLine($"[ExtractAudioAsync] Starting FFmpeg conversion for: {videoFilePath} at {DateTime.Now}");
 
         // Prepare the ffmpeg process to extract audio
         var ffmpeg = new ProcessStartInfo
@@ -530,28 +588,66 @@ public class Program
         // Check if ffmpeg succeeded
         if (process.ExitCode != 0)
         {
-            var errorMessage = $"ffmpeg failed with exit code {process.ExitCode}. Error: {error}";
-            Console.WriteLine(errorMessage);
-            throw new InvalidOperationException(errorMessage);
+            Console.WriteLine($"[ExtractAudioAsync] FFmpeg failed for: {audioFilePath}");
+            throw new InvalidOperationException($"FFmpeg failed with exit code {process.ExitCode}");
         }
         else
         {
-            Console.WriteLine($"ffmpeg conversion of .mp4 {videoFilePath} to .mp3 {audioFilePath} completed successfully.");
+            Console.WriteLine($"[ExtractAudioAsync] FFmpeg conversion succeeded for: {audioFilePath}");
+            Console.WriteLine($"[ExtractAudioAsync] File size of {audioFilePath}: {new FileInfo(audioFilePath).Length} bytes");
         }
 
         // Return the path of the extracted audio file
         return audioFilePath;
     }
-    private static async Task<InsightResult> TranscribeFileAsync(string audioFilePath)
+    private static async Task<InsightResult> TranscribeFileAsync(string audioFilePath, string sttFile)
     {
-        var res = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.OpenAI, audioFilePath);
+        Console.WriteLine($"[TranscribeFileAsync] Starting transcription for: {audioFilePath} at {DateTime.Now}");
 
-        return res!;
+        var insightResult = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.OpenAI, audioFilePath);
+
+        await SaveInsightToFileAsync(insightResult!, sttFile);
+
+        Console.WriteLine($"[TranscribeFileAsync] Transcription saved to: {sttFile}");
+
+        return insightResult!;
     }
-    private static async Task SaveTranscriptionResultAsync(InsightResult insightResult, string filePath)
+    private static async Task RunTranslation(JobRequest jobRequest, string channel, InsightResult sttInsightResult, string sttJsonFile)
+    {
+        if(jobRequest.TranslationLanguages == null || jobRequest.ExpectedAudioLanguage == null)
+        {
+            Console.WriteLine("Request is missing TranslationLanguages or ExpectedAudioLanguage");
+            throw new Exception($"Translation Request is missing translation languages.");
+        }
+
+        foreach (var trLanguage in jobRequest.TranslationLanguages!)
+        {
+            Console.WriteLine($"[RunTranslation] Translating to {trLanguage} for {sttJsonFile} at {DateTime.Now}");
+
+            var trRequest = GetInsightRequest(SystemInsightTypes.Translation, jobRequest.ExpectedAudioLanguage, trLanguage);
+
+            var trInsightInputData = new InsightInputData
+            {
+                SourceInsightInput = sttInsightResult,
+            };
+
+            trInsightInputData.SourceInsightInput.SourceInsightType = SystemInsightTypes.Transcription;
+
+            var azureTrProvider = GetProvider(ProviderType.Azure, trInsightInputData, trRequest);
+
+            var trInsightResult = await azureTrProvider!.ProcessAsync(trInsightInputData, trRequest);
+
+            await SaveInsightToFileAsync(trInsightResult![0], sttJsonFile.Replace(".json",$"_{trLanguage}.json"));
+
+            Console.WriteLine($"[RunTranslation] Translation saved: {sttJsonFile.Replace(".json", $"_{trLanguage}.json")}");
+        }
+
+        await Task.CompletedTask;
+    }
+    private static async Task SaveInsightToFileAsync(InsightResult insightResult, string filePath)
     {
         // Trim leading and trailing whitespaces in the Text property
-        foreach (var item in insightResult.TimeCodedContent)
+        foreach (var item in insightResult.TimeCodedContent!)
         {
             item.Text = item.Text.Trim();
         }
@@ -562,18 +658,14 @@ public class Program
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull, // Ignore null properties
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping // Allow direct Unicode characters
         };
-
-        // Serialize the object to a JSON string
+        
         string jsonString = JsonSerializer.Serialize(insightResult, options);
 
-        // Write the JSON string to a file
         await File.WriteAllTextAsync(filePath, jsonString);
 
+        Console.WriteLine($"[SaveInsightToFileAsync] File saved: {filePath}, size: {new FileInfo(filePath).Length} bytes");
+
         await SaveClosedCaption();
-    }
-    private static async Task RunTranslation(JobRequest jobRequest, string channel, InsightResult insightResult)
-    {
-        await Task.CompletedTask;
     }
     private static async Task SaveClosedCaption()
     {
@@ -643,129 +735,46 @@ public class Program
 
         return results[0];
     }
+    private static async Task PollDirectoryForNewFiles(JobRequest jobRequest, TimeSpan pollingInterval)
+    {
+        while (true)
+        {
+            foreach (var channel in jobRequest.Channels)
+            {
+                string channelPath = Path.Combine(inputFilesDirectory, channel);
+                var newFiles = Directory.GetFiles(channelPath, "*.mp4");
+
+                foreach (var filePath in newFiles)
+                {
+                    // Process the file
+                    await OnNewFileCreated(filePath, jobRequest, channel);
+                }
+            }
+
+            await Task.Delay(pollingInterval); // Wait before polling again
+        }
+    }
 }
-//public static async Task MonitorAndProcessNewFiles(JobRequest jobRequest)
-//{
-//    Stopwatch stopwatch = Stopwatch.StartNew();
-//    Console.WriteLine($"Starting real-time processing for Rule ID: {jobRequest.Id}");
+/*
+If multiple files are being detected frequently (e.g., every 20 seconds), you might consider using a queue system.This decouples the file detection from the processing and allows you to control how many files are processed at a time.
 
-//    // Convert the endTime from string to DateTime and add 6 minutes
-//    DateTime endTime = DateTime.ParseExact(jobRequest.EndTime, "yyyy_MM_dd_HH_mm_ss", CultureInfo.InvariantCulture).AddMinutes(6);
+Example using a queue and task executors:
+private static ConcurrentQueue<string> fileQueue = new ConcurrentQueue<string>();
+private static void EnqueueNewFile(string filePath)
+{
+    fileQueue.Enqueue(filePath);
+}
+public static async Task ProcessQueueAsync(JobRequest jobRequest)
+{
+    while (true)
+    {
+        if (fileQueue.TryDequeue(out var filePath))
+        {
+            await ProcessFileAsync(filePath, jobRequest, "channel");
+        }
 
-//    // Create a list of tasks to process each channel in parallel
-//    var channelTasks = new List<Task>();
-
-//    // Use FileSystemWatcher to listen for new files being created in the channel directories
-//    foreach (var channel in jobRequest.Channels)
-//    {
-//        var task = Task.Run(async () =>
-//        {
-//            string channelPath = Path.Combine(inputFilesDirectory, channel);
-
-//            using var watcher = new FileSystemWatcher(channelPath)
-//            {
-//                Filter = "*.mp4", // Only watch for new .mp4 files
-//                IncludeSubdirectories = true // Monitor subdirectories as well
-//            };
-
-//            watcher.Created += async (sender, e) =>
-//            {
-//                Console.WriteLine($"New file detected: {e.FullPath}");
-//                string file = e.FullPath;
-
-//                if (jobRequest.JobTypes.Contains(JobType.FaceDetection))
-//                {
-//                    await RunFaceDetection();
-//                }
-
-//                if (jobRequest.JobTypes.Contains(JobType.LogoDetection))
-//                {
-//                    await RunLogoDetection();
-//                }
-
-//                if (jobRequest.JobTypes.Contains(JobType.CreateClosedCaptions) ||
-//                   jobRequest.JobTypes.Contains(JobType.KeywordsDetection) ||
-//                   jobRequest.JobTypes.Contains(JobType.Translation) ||
-//                   jobRequest.JobTypes.Contains(JobType.VerifyAudioLanguage))
-//                {
-//                    var mp3File = file.Replace(".mp4", ".mp3");
-//                    var sttJsonFile = file.Replace(".mp4", ".json");
-
-//                    if (!File.Exists(mp3File))
-//                    {
-//                        // Convert .mp4 to .mp3
-//                        mp3File = await ExtractAudioAsync(file);
-
-//                        if (!IsExtractionSucceeded(mp3File)) // it fails if result .mp3 is less than 5MB
-//                            return;
-//                    }
-
-//                    ///////////////////////////////////////////////////////////////
-//                    // Introduce a retry mechanism with delay before accessing the mp3 file
-//                    bool fileReady = false;
-//                    int retries = 5; // Retry up to 5 times
-//                    int delayMilliseconds = 2000; // Wait 2 seconds between retries
-
-//                    while (!fileReady && retries > 0)
-//                    {
-//                        try
-//                        {
-//                            // Attempt to open the file exclusively to check if it's ready
-//                            using (var fileStream = File.Open(mp3File, FileMode.Open, FileAccess.Read, FileShare.None))
-//                            {
-//                                fileReady = true;
-//                            }
-//                        }
-//                        catch (IOException)
-//                        {
-//                            // The file is still in use by another process, wait before retrying
-//                            Console.WriteLine($"File {mp3File} is being used by another process, retrying...");
-//                            await Task.Delay(delayMilliseconds);
-//                            retries--;
-//                        }
-//                    }
-//                    if (!fileReady)
-//                    {
-//                        Console.WriteLine($"Failed to access {mp3File} after multiple retries. Skipping file.");
-//                        return;
-//                    }
-//                    ///////////////////////////////////////////////
-
-//                    if (!File.Exists(sttJsonFile)) // Transcribe only if the json file doesn't exist
-//                    {
-//                        InsightResult insightResult = await TranscribeFileAsync(mp3File);
-//                        await SaveTranscriptionResultAsync(insightResult, sttJsonFile);
-
-//                        if (jobRequest.JobTypes.Contains(JobType.KeywordsDetection))
-//                        {
-//                            await RunKeywordsDetection(jobRequest, insightResult, channel, sttJsonFile);
-//                        }
-
-//                        if (jobRequest.JobTypes.Contains(JobType.Translation))
-//                        {
-//                            await RunTranslation(jobRequest, channel, insightResult);
-//                        }
-//                    }
-//                }
-//            };
-
-//            watcher.EnableRaisingEvents = true;
-
-//            // Keep the FileSystemWatcher running until the end time is reached
-//            while (DateTime.Now < endTime)
-//            {
-//                await Task.Delay(30000); // Check every 30 seconds
-//            }
-//        });
-
-//        // Add the task to the list of tasks
-//        channelTasks.Add(task);
-//    }
-
-//    // Wait for all channel tasks to complete in parallel
-//    await Task.WhenAll(channelTasks);
-
-//    stopwatch.Stop();
-//    var elapsedMinutes = stopwatch.ElapsedMilliseconds / 60000.0;
-//    Console.WriteLine($"Finished real-time processing for Rule ID: {jobRequest.Id}, Elapsed Time: {elapsedMinutes} minutes");
-//}
+        await Task.Delay(100); // Prevent tight looping
+    }
+}
+You would then call EnqueueNewFile in the OnNewFileCreated method and let ProcessQueueAsync run as a background task.
+*/
