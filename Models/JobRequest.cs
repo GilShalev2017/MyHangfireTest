@@ -11,19 +11,19 @@ namespace HangfireTest.Models
         public string? CronExpression { get; set; } //Cron time for example: "14 15 * * *" <-when to invoke the processing every day! the format is:"mm hh * * *"
         public string? Id { get; set; }
         public List<string> Channels { get; set; } = new List<string>();
-        // StartTime && EndTime define the time range to process
-        public required string StartTime { get; set; }
-        public required string EndTime { get; set; }
+        // BraodcastStartTime && BroadcastEndTime define the time range to process
+        public required string BroadcastStartTime { get; set; }
+        public required string BroadcastEndTime { get; set; }
         public List<string>? Keywords { get; set; } = new List<string>();
-        public required List<string> JobTypes { get; set; } = new List<string>();
+        public required List<string> Operations { get; set; } = new List<string>();
         public string? ExpectedAudioLanguage { get; set; }
         public List<string>? TranslationLanguages { get; set; }
     }
 
     public enum InvocationType
     {
-        RT,
-        NoneRT,
+        RealTime,//Streaming?
+        Batch,
         Both,
     }
 

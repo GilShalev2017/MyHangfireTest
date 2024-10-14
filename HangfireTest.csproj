@@ -11,12 +11,17 @@
     <PackageReference Include="Hangfire.AspNetCore" Version="1.8.14" />
     <PackageReference Include="Hangfire.Mongo" Version="1.10.9" />
     <PackageReference Include="MSTest.TestFramework" Version="3.6.1" />
+    <PackageReference Include="NLog" Version="5.3.4" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\ActDev\src\Services\ActIntelligenceService\ActIntelligenceService.csproj" />
-    <ProjectReference Include="..\..\ActDev\src\Services\UnitTest\IntelligenceServiceTest\IntelligenceServiceTest.csproj" />
+    <ProjectReference Include="..\..\ActDev\src\Services\tests\Unit\IntelligenceServiceTest\IntelligenceServiceTest.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Logs\" />
   </ItemGroup>
 
 </Project>
