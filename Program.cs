@@ -257,20 +257,20 @@ public static async Task ProcessExistingFiles(JobRequest jobRequest)
         // Loop through each file in range
         await Task.WhenAll(filesInRange.Select(async file =>
         {
-            if (jobRequest.Operations.Contains(JobType.DetectFaces))
+            if (jobRequest.Operations.Contains(Operation.DetectFaces))
             {
                 await RunFaceDetection();
             }
 
-            if (jobRequest.Operations.Contains(JobType.DetectLogo))
+            if (jobRequest.Operations.Contains(Operation.DetectLogo))
             {
                 await RunLogoDetection();
             }
 
-            if (jobRequest.Operations.Contains(JobType.CreateClosedCaptions) ||
-               jobRequest.Operations.Contains(JobType.DetectKeywords) ||
-               jobRequest.Operations.Contains(JobType.Translation) ||
-               jobRequest.Operations.Contains(JobType.VerifyAudioLanguage)
+            if (jobRequest.Operations.Contains(Operation.CreateClosedCaptions) ||
+               jobRequest.Operations.Contains(Operation.DetectKeywords) ||
+               jobRequest.Operations.Contains(Operation.Translation) ||
+               jobRequest.Operations.Contains(Operation.VerifyAudioLanguage)
             )
             {
                 var mp3File = file.Replace(".mp4", ".mp3");
@@ -289,12 +289,12 @@ public static async Task ProcessExistingFiles(JobRequest jobRequest)
                 {
                     InsightResult insightResult = await TranscribeFileAsync(mp3File, sttJsonFile);
 
-                    if (jobRequest.Operations.Contains(JobType.DetectKeywords))
+                    if (jobRequest.Operations.Contains(Operation.DetectKeywords))
                     {
                         await RunKeywordsDetection(jobRequest, insightResult, channel, sttJsonFile);
                     }
 
-                    if (jobRequest.Operations.Contains(JobType.Translation))
+                    if (jobRequest.Operations.Contains(Operation.Translation))
                     {
                         await RunTranslations(jobRequest, channel, insightResult, sttJsonFile);
                     }
@@ -425,18 +425,18 @@ private static async Task ProcessFileAsync(string mp4FilePath, JobRequest jobReq
         Logger.Debug($"Transcription took: {stopwatch.Elapsed.TotalSeconds} seconds");
 
         //parallelized invocation of RunKeywordsDetection and an RunTranslation
-        if (jobRequest.Operations.Contains(JobType.DetectKeywords) && jobRequest.Operations.Contains(JobType.Translation))
+        if (jobRequest.Operations.Contains(Operation.DetectKeywords) && jobRequest.Operations.Contains(Operation.Translation))
         {
             await Task.WhenAll(
                 RunKeywordsDetection(jobRequest, insightResult, channel, sttFile),
                 RunTranslations(jobRequest, channel, insightResult, sttFile)
             );
         }
-        else if (jobRequest.Operations.Contains(JobType.DetectKeywords))
+        else if (jobRequest.Operations.Contains(Operation.DetectKeywords))
         {
             await RunKeywordsDetection(jobRequest, insightResult, channel, sttFile);
         }
-        else if (jobRequest.Operations.Contains(JobType.Translation))
+        else if (jobRequest.Operations.Contains(Operation.Translation))
         {
             await RunTranslations(jobRequest, channel, insightResult, sttFile);
         }

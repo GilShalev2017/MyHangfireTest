@@ -7,11 +7,11 @@ using System.Globalization;
 
 namespace HangfireTest.Services
 {
-    public static class JobType
+    public static class Operation
     {
         public const string DetectKeywords = "DetectKeywords";
         public const string CreateClosedCaptions = "CreateClosedCaptions";
-        public const string Translation = "Translation";
+        public const string TranslateTranscription = "Translation";
         public const string VerifyAudioLanguage = "VerifyAudioLanguage";
         public const string DetectFaces = "DetectFaces";
         public const string DetectLogo = "DetectLogo";
@@ -141,20 +141,20 @@ namespace HangfireTest.Services
                 // Loop through each file in range
                 await Task.WhenAll(filesInRange.Select(async file =>
                 {
-                    if (jobRequest.Operations.Contains(JobType.DetectFaces))
+                    if (jobRequest.Operations.Contains(Operation.DetectFaces))
                     {
                         await _xxxOperationsService.DetectFacesAsync(file);
                     }
 
-                    if (jobRequest.Operations.Contains(JobType.DetectLogo))
+                    if (jobRequest.Operations.Contains(Operation.DetectLogo))
                     {
                         await _xxxOperationsService.DetectLogosAsync(file);
                     }
 
-                    if (jobRequest.Operations.Contains(JobType.CreateClosedCaptions) ||
-                       jobRequest.Operations.Contains(JobType.DetectKeywords) ||
-                       jobRequest.Operations.Contains(JobType.Translation) ||
-                       jobRequest.Operations.Contains(JobType.VerifyAudioLanguage)
+                    if (jobRequest.Operations.Contains(Operation.CreateClosedCaptions) ||
+                       jobRequest.Operations.Contains(Operation.DetectKeywords) ||
+                       jobRequest.Operations.Contains(Operation.TranslateTranscription) ||
+                       jobRequest.Operations.Contains(Operation.VerifyAudioLanguage)
                     )
                     {
                         var mp3File = file.Replace(".mp4", ".mp3");
@@ -173,12 +173,12 @@ namespace HangfireTest.Services
                         {
                             InsightResult insightResult = await _xxxOperationsService.TranscribeFileAsync(mp3File, sttJsonFile);
 
-                            if (jobRequest.Operations.Contains(JobType.DetectKeywords))
+                            if (jobRequest.Operations.Contains(Operation.DetectKeywords))
                             {
                                 await _xxxOperationsService.DetectKeywordsAsync(jobRequest, insightResult, channel, sttJsonFile);
                             }
 
-                            if (jobRequest.Operations.Contains(JobType.Translation))
+                            if (jobRequest.Operations.Contains(Operation.TranslateTranscription))
                             {
                                 await _xxxOperationsService.TranslateTranscriptionAsync(jobRequest, channel, insightResult, sttJsonFile);
                             }
@@ -309,18 +309,18 @@ namespace HangfireTest.Services
                 Logger.Debug($"Transcription took: {stopwatch.Elapsed.TotalSeconds} seconds");
               
                 //parallelized invocation of RunKeywordsDetection and an RunTranslation
-                if (jobRequest.Operations.Contains(JobType.DetectKeywords) && jobRequest.Operations.Contains(JobType.Translation))
+                if (jobRequest.Operations.Contains(Operation.DetectKeywords) && jobRequest.Operations.Contains(Operation.TranslateTranscription))
                 {
                     await Task.WhenAll(
                         _xxxOperationsService.DetectKeywordsAsync(jobRequest, insightResult, channel, sttFile),
                         _xxxOperationsService.TranslateTranscriptionAsync(jobRequest, channel, insightResult, sttFile)
                     );
                 }
-                else if (jobRequest.Operations.Contains(JobType.DetectKeywords))
+                else if (jobRequest.Operations.Contains(Operation.DetectKeywords))
                 {
                     await _xxxOperationsService.DetectKeywordsAsync(jobRequest, insightResult, channel, sttFile);
                 }
-                else if (jobRequest.Operations.Contains(JobType.Translation))
+                else if (jobRequest.Operations.Contains(Operation.TranslateTranscription))
                 {
                     await _xxxOperationsService.TranslateTranscriptionAsync(jobRequest, channel, insightResult, sttFile);
                 }
