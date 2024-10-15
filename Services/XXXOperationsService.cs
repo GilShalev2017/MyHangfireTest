@@ -9,6 +9,10 @@ using System.Text.Json;
 using HangfireTest.Models;
 using ActIntelligenceService.Domain.Models.InsightProviders;
 using IntelligenceServiceTest;
+using ActInfra.Models;
+using System.Globalization;
+using System.IO;
+using ActCommon;
 
 namespace HangfireTest.Services
 {
@@ -21,9 +25,9 @@ namespace HangfireTest.Services
         Task<InsightResult> TranscribeFileAsync(string audioFilePath, string sttFile);
         Task TranslateTranscriptionAsync(JobRequest jobRequest, string channel, InsightResult sttInsightResult, string sttJsonFile);
         Task DetectKeywordsAsync(JobRequest jobRequest, InsightResult insightResult, string channel, string sttJsonFile);
-        //Task<UnexpectedLanguageResult> DetectUnexpectedLanguageAsync(string filePath, string expectedLanguage);
-        //Task SaveTranscriptionAsClosedCaptionsAsync(string transcription, string outputPath);
+        Task SaveTranscriptionAsClosedCaptionsAsync(InsightResult sttInsightResult, string audioFilePath, string outputFolderPath, string channel);
         //Task<LanguageDetectionResult> DetectAudioLanguageAsync(string filePath);
+        //Task<UnexpectedLanguageResult> DetectUnexpectedLanguageAsync(string filePath, string expectedLanguage);
     }
 
     public class XXXOperationsService : IXXXOperationsService
@@ -48,6 +52,8 @@ namespace HangfireTest.Services
                 }
             }
         }
+
+        #region IXXXOperationsService
         public async Task<string> ExtractAudioAsync(string videoFilePath)
         {
             var audioFilePath = videoFilePath.Replace(".mp4", ".mp3");
@@ -168,6 +174,72 @@ namespace HangfireTest.Services
                 }
             }
         }
+        public async Task SaveTranscriptionAsClosedCaptionsAsync(InsightResult sttInsightResult, string audioFilePath, string outputFolderPath, string channel)
+        {
+            try
+            {
+                if(sttInsightResult.TimeCodedContent != null && sttInsightResult.TimeCodedContent.Count > 0)
+                { 
+                    string fileNameDate = Path.GetFileNameWithoutExtension(audioFilePath);
+                    int firstSplitIndex = fileNameDate.IndexOf('_') + 1;
+                    int lastSplitIndex = fileNameDate.LastIndexOf('_');
+                    fileNameDate = fileNameDate.Substring(firstSplitIndex, lastSplitIndex - firstSplitIndex);
+                    DateTime fileDate = DateTime.ParseExact(fileNameDate, "yyyy_MM_dd_HH_mm", CultureInfo.InvariantCulture);
+
+                    int lastTimeSec = 0;
+                    foreach (Transcript ts in sttInsightResult.TimeCodedContent)
+                    {
+                        DateTime ccStartTime = fileDate + TimeSpan.FromSeconds(lastTimeSec);
+                        DateTime ccEndTime = fileDate + TimeSpan.FromSeconds(ts.EndInSeconds);
+                        TimeSpan ccDuration = ccEndTime - ccStartTime;
+                        lastTimeSec = ts.EndInSeconds;
+
+                        int duration = (int)Math.Round(ccDuration.TotalSeconds);
+                        DateTime sttFileDate = new DateTime(ccStartTime.Year, ccStartTime.Month, ccStartTime.Day, ccStartTime.Hour, ccStartTime.Minute, ccStartTime.Second);
+                        string rightDigit = (duration / 10).ToString();
+                        string leftDigit = (duration % 10).ToString();
+                        fileNameDate = sttFileDate.ToString("yyyy_MM_dd_HH_mm_ss") + "_" + rightDigit + leftDigit;
+                        string destFileParse = Path.Combine(outputFolderPath, fileNameDate + ".txt");
+                        if (!File.Exists(destFileParse))
+                        {
+                            //CCHelper is defined in ActCommon
+                            //await CCHelper.WriteTxtResultAsync(ts.Text, destFileParse); //writing the translated sentence in a txt file
+                            await WriteTxtResultAsync(ts.Text, destFileParse);
+                            
+                            //Safe upload to Lucene <-IS THIS REALLY NEEDED?
+                            /*
+                            try
+                            {
+                                int channelID = GetChannelID(channel);
+                                LuceneSchema.CCLuceneDoc ccdoc = new LuceneSchema.CCLuceneDoc()
+                                {
+                                    content = ts.Text,
+                                    date = fileDate,
+                                    lang = Path.GetFileName(outputFolderPath),
+                                    path = destFileParse,
+                                    //channel_id = fileInfo.channel.channelID,
+                                    //physical_channel = fileInfo.channel.physicalName
+                                    channel_id = channelID,
+                                    physical_channel = channel
+                                };
+                                await LuceneHelper.InsertAsync(ccdoc);
+                            }
+                            catch
+                            {
+
+                            }*/
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"error: SaveTranscriptionAsClosedCaptionsAsync {ex.Message}");
+            }
+        }
+        
+        #endregion IXXXOperationsService
+
         private static async Task<List<KeywordMatch>> FindKeywordsAsync(InsightResult insightResult, List<string> keywords, string channelName, string fileName)
         {
             var keywordMatches = new List<KeywordMatch>();
@@ -296,6 +368,65 @@ namespace HangfireTest.Services
 
             return results[0];
         }
+        private static async Task WriteTxtResultAsync(string text, string pathDestFile)
+        {
+            List<string> allLines = new List<string>();
+            while (text.Length != 0)
+            {
+                if (text.Length <= 32)
+                {
+                    allLines.Add(text);
+                    text = "";
+                }
+                else if (text.Length > 32)
+                {
+                    int closeSpace = text.LastIndexOfAny(" .,;:{}\uFF0C\uFF0E\uFF1A\uFF1B".ToCharArray(), 32);   //Unicode for FullWidth: ,.:;
+                    if (closeSpace == -1)
+                        closeSpace = 30;
+                    string startLine = text.Substring(0, closeSpace);
+                    allLines.Add(startLine);
+                    int len = text.Length - 1 - closeSpace;
+                    text = text.Substring(closeSpace + 1, len);
+                }
+            }
+            int numOfBlankLines = 22 - allLines.Count;
+            using (StreamWriter file = new StreamWriter(pathDestFile, true, Encoding.Unicode)) //true for append
+            {
+                for (int i = 0; i < numOfBlankLines; i++)
+                {
+                    //writes all blank lines in the beggining of the file
+                    await file.WriteAsync(new String(' ', 40));
+                    await file.WriteAsync("\n");
+                }
+                foreach (string curline in allLines) //writing the text in the correct line in the txt file
+                {
+                    if (curline.Length == 32)
+                    {
+                        string line = new String(' ', 4) + curline + new String(' ', 4);
+                        await file.WriteAsync(line);
+                        await file.WriteAsync("\n");
+                    }
+                    else if (curline.Length < 32)
+                    {
+                        int half = (int)Math.Ceiling((double)curline.Length / 2);
+                        int indexStart = 16 - half + 4;
+                        int numOfspaces = indexStart - 1;
+                        string line = new String(' ', numOfspaces) + curline + new string(' ', numOfspaces);
+                        if (line.Length < 40)
+                        {
+                            line += new string(' ', 40 - line.Length);
+                        }
+                        await file.WriteAsync(line);
+                        await file.WriteAsync("\n");
+                    }
+                }
+            }
 
+        }
+        private static int GetChannelID(string channel)
+        {
+            int channelID = Convert.ToInt32(channel.ToLower().Replace("channel",""));
+            return channelID;
+        }
     }
 }

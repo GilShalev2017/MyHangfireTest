@@ -160,11 +160,11 @@ private static async void InitProvidersEnvironment()
 }
 private static void ProcessJob(JobRequest jobRequest)
 {
-    var invocationType = FindInvocationType(jobRequest);
+    var invocationType = GetInvocationType(jobRequest);
 
     EnqueueJob(jobRequest, invocationType);
 }
-private static InvocationType FindInvocationType(JobRequest jobRequest)
+private static InvocationType GetInvocationType(JobRequest jobRequest)
 {
     // Parse BraodcastStartTime and BroadcastEndTime into DateTime objects
     DateTime startTime = DateTime.ParseExact(jobRequest.BroadcastStartTime, "yyyy_MM_dd_HH_mm_ss", null);

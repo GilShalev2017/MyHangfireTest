@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\ActDev\src\ActCommon\ActCommon.csproj" />
     <ProjectReference Include="..\..\ActDev\src\Services\ActIntelligenceService\ActIntelligenceService.csproj" />
     <ProjectReference Include="..\..\ActDev\src\Services\tests\Unit\IntelligenceServiceTest\IntelligenceServiceTest.csproj" />
   </ItemGroup>

@@ -35,7 +35,7 @@ namespace HangfireTest.Services
         public Task ScheduleJobAsync(JobRequest jobRequest)
         {
             // Example with Hangfire
-            var invocationType = FindInvocationType(jobRequest);
+            var invocationType = GetInvocationType(jobRequest);
 
             EnqueueJob(jobRequest, invocationType);
 
@@ -48,7 +48,7 @@ namespace HangfireTest.Services
             // Execute job here by invoking the right processors
             return Task.CompletedTask;
         }
-        private InvocationType FindInvocationType(JobRequest jobRequest)
+        private InvocationType GetInvocationType(JobRequest jobRequest)
         {
             // Parse BraodcastStartTime and BroadcastEndTime into DateTime objects
             DateTime startTime = DateTime.ParseExact(jobRequest.BroadcastStartTime, "yyyy_MM_dd_HH_mm_ss", null);
@@ -181,6 +181,16 @@ namespace HangfireTest.Services
                             if (jobRequest.Operations.Contains(Operation.TranslateTranscription))
                             {
                                 await _xxxOperationsService.TranslateTranscriptionAsync(jobRequest, channel, insightResult, sttJsonFile);
+                            }
+
+                            if (jobRequest.Operations.Contains(Operation.CreateClosedCaptions))
+                            {
+                                var outputFolderPath = Path.Combine(new FileInfo(sttJsonFile).DirectoryName!, "closed_captions"); //TODO should be an inner folder with the LngID name
+                                if (!Directory.Exists(outputFolderPath))
+                                {
+                                    Directory.CreateDirectory(outputFolderPath);
+                                }
+                                await _xxxOperationsService.SaveTranscriptionAsClosedCaptionsAsync(insightResult, mp3File, outputFolderPath!, channel);
                             }
                         }
                     }
