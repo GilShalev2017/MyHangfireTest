@@ -58,13 +58,13 @@ namespace HangfireTest.Controllers
         }
 
 
-        [HttpGet("status/{jobId}")]
-        public async Task<IActionResult> GetJobStatus(string jobId)
-        {
-            var status = await _xxxJobService.GetJobStatusAsync(jobId);
+        //[HttpGet("status/{jobId}")]
+        //public async Task<IActionResult> GetJobStatus(string jobId)
+        //{
+        //    var status = await _xxxJobService.GetJobStatusAsync(jobId);
 
-            return Ok(status);
-        }
+        //    return Ok(status);
+        //}
 
         //[HttpGet("report/{jobId}")]
         //public async Task<IActionResult> GetJobReport(string jobId)

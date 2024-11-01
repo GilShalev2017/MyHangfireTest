@@ -30,7 +30,7 @@ namespace HangfireTest.Repositories
         public string? Id { get; set; }
         public string? Status { get; set; } //pending, succeded, failed
         public DateTime? ScheduledTime { get; set; }
-        public DateTime? CreatedAt { get; set; }
+        public string? CreatedAt { get; set; }
         public string? CreatedBy { get; set; }
     }
     public interface IXXXJobRepository
@@ -53,31 +53,40 @@ namespace HangfireTest.Repositories
         }
         public async Task CreateJobAsync(JobRequest jobRequest)
         {
-            var newJob = new JobRequestEntity
+            // Define the format that matches the file timestamp
+            string format = "yyyy_MM_dd_HH_mm_ss";
+
+            // Attempt to parse the file timestamp into a DateTime object
+            if (DateTime.TryParseExact(jobRequest.BroadcastStartTime,
+                                       format,
+                                       CultureInfo.InvariantCulture,
+                                       DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                                       out DateTime scheduledTime))
             {
-                // Set up the job details: time range, operations, etc.
-                Name = jobRequest.Name,
-                IsRealTime = jobRequest.IsRealTime,
-                IsRecurring = jobRequest.IsRecurring,
-                ExecutionTime = jobRequest.ExecutionTime,
-                CronExpression = jobRequest.CronExpression,
-                Id = jobRequest.Id,
-                Channels = jobRequest.Channels,
-                BroadcastStartTime = jobRequest.BroadcastStartTime,
-                BroadcastEndTime = jobRequest.BroadcastEndTime,
-                Keywords = jobRequest.Keywords,
-                Operations = jobRequest.Operations,
-                ExpectedAudioLanguage = jobRequest.ExpectedAudioLanguage,
-                TranslationLanguages = jobRequest.TranslationLanguages,
+                var newJob = new JobRequestEntity
+                {
+                    // Set up the job details: time range, operations, etc.
+                    Name = jobRequest.Name,
+                    IsRealTime = jobRequest.IsRealTime,
+                    IsRecurring = jobRequest.IsRecurring,
+                    ExecutionTime = jobRequest.ExecutionTime,
+                    CronExpression = jobRequest.CronExpression,
+                    Id = jobRequest.Id,
+                    Channels = jobRequest.Channels,
+                    BroadcastStartTime = jobRequest.BroadcastStartTime,
+                    BroadcastEndTime = jobRequest.BroadcastEndTime,
+                    Keywords = jobRequest.Keywords,
+                    Operations = jobRequest.Operations,
+                    ExpectedAudioLanguage = jobRequest.ExpectedAudioLanguage,
+                    TranslationLanguages = jobRequest.TranslationLanguages,
 
-                Status = "Pending",
-                CreatedAt = DateTime.Now,
-                //ScheduledTime = string dateString = "2023-12-31T09:40:00";
-                //ScheduledTime = DateTime.Parse(dateString),
-                ScheduledTime = DateTime.ParseExact(jobRequest.BroadcastStartTime, "yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)
-            };
+                    Status = "Pending",
+                    CreatedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"),
+                    ScheduledTime = DateTime.SpecifyKind(scheduledTime, DateTimeKind.Utc)
+                };
 
-            await _jobsCollection.InsertOneAsync(newJob);
+                await _jobsCollection.InsertOneAsync(newJob);
+            }
         }
         public async Task<JobRequestEntity> GetJobStatusAsync(string jobId)
         {

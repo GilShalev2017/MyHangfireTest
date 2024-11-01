@@ -1,6 +1,7 @@
 ﻿using ActIntelligenceService.Domain.Models;
 using Hangfire;
 using HangfireTest.Models;
+using HangfireTest.Repositories;
 using NLog;
 using System.Diagnostics;
 using System.Globalization;
@@ -27,19 +28,23 @@ namespace HangfireTest.Services
         private static string inputFilesDirectory = @"C:\Development\HangfireTest\Media\Record";
         private readonly IXXXOperationsService _xxxOperationsService;
         private static List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
+        private readonly IXXXJobRepository _jobRepository;
 
-        public XXXHangfireJobSchedulerService(IXXXOperationsService xxxOperationsService)
+        public XXXHangfireJobSchedulerService(IXXXOperationsService xxxOperationsService, IXXXJobRepository jobRepository)
         {
             _xxxOperationsService = xxxOperationsService;
+            _jobRepository = jobRepository;
         }
-        public Task ScheduleJobAsync(JobRequest jobRequest)
+        public async Task ScheduleJobAsync(JobRequest jobRequest)
         {
+            await _jobRepository.CreateJobAsync(jobRequest);
+
             // Example with Hangfire
             var invocationType = GetInvocationType(jobRequest);
 
             EnqueueJob(jobRequest, invocationType);
 
-            return Task.CompletedTask;
+            //return Task.CompletedTask;
         }
 
         [JobDisplayName("Job Execution")]
