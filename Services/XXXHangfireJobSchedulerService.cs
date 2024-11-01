@@ -17,18 +17,18 @@ namespace HangfireTest.Services
         public const string DetectLogo = "DetectLogo";
     }
 
-    public interface IXXXJobScheduler
+    public interface IXXXHangfireJobSchedulerService
     {
         Task ScheduleJobAsync(JobRequest jobRequest);
     }
-    public class XXXJobScheduler : IXXXJobScheduler
+    public class XXXHangfireJobSchedulerService : IXXXHangfireJobSchedulerService
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger(); // NLog logger
         private static string inputFilesDirectory = @"C:\Development\HangfireTest\Media\Record";
         private readonly IXXXOperationsService _xxxOperationsService;
         private static List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
 
-        public XXXJobScheduler(IXXXOperationsService xxxOperationsService)
+        public XXXHangfireJobSchedulerService(IXXXOperationsService xxxOperationsService)
         {
             _xxxOperationsService = xxxOperationsService;
         }

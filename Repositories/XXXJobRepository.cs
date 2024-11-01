@@ -4,15 +4,14 @@ using HangfireTest.Models;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Http;
+using System.Globalization;
 
 namespace HangfireTest.Repositories
 {
-    public class XXXInsightJobEntity
+    public class JobRequestEntity
     {
-        [BsonId]
-        [BsonRepresentation(BsonType.ObjectId)]
-        public string? Id { get; set; }
-
         public required string Name { get; set; }
         public required bool IsRealTime { get; set; }
         public bool IsRecurring { get; set; } = false;
@@ -26,32 +25,35 @@ namespace HangfireTest.Repositories
         public string? ExpectedAudioLanguage { get; set; }
         public List<string>? TranslationLanguages { get; set; }
 
-
+        [BsonId]
+        [BsonRepresentation(BsonType.ObjectId)]
+        public string? Id { get; set; }
         public string? Status { get; set; } //pending, succeded, failed
-        public string? StartTime { get; set; }
-        public string? CreatedAt { get; set; }
+        public DateTime? ScheduledTime { get; set; }
+        public DateTime? CreatedAt { get; set; }
         public string? CreatedBy { get; set; }
     }
     public interface IXXXJobRepository
     {
         Task CreateJobAsync(JobRequest jobRequest);
-        Task<XXXInsightJobEntity> GetJobStatusAsync(string jobId);
-        Task<List<JobRequest>> GetUnfinishedJobsAsync();
+        Task<JobRequestEntity> GetJobStatusAsync(string jobId);
+        Task<List<JobRequestEntity>> GetUnfinishedJobsAsync();
+        Task<List<JobRequestEntity>> GetAllPendingJobsAsync();
     }
     public class XXXJobRepository : IXXXJobRepository
     {
-        private readonly IMongoCollection<XXXInsightJobEntity> _jobsCollection;
+        private readonly IMongoCollection<JobRequestEntity> _jobsCollection;
         private const string CollectionName = "mediainsight_jobs";
 
         public XXXJobRepository(IMongoClient mongoClient)
         {
             var database = mongoClient.GetDatabase("ActusIntelligenceTest");
            
-            _jobsCollection = database.GetCollection<XXXInsightJobEntity>(CollectionName);
+            _jobsCollection = database.GetCollection<JobRequestEntity>(CollectionName);
         }
         public async Task CreateJobAsync(JobRequest jobRequest)
         {
-            var newJob = new XXXInsightJobEntity
+            var newJob = new JobRequestEntity
             {
                 // Set up the job details: time range, operations, etc.
                 Name = jobRequest.Name,
@@ -66,16 +68,51 @@ namespace HangfireTest.Repositories
                 Keywords = jobRequest.Keywords,
                 Operations = jobRequest.Operations,
                 ExpectedAudioLanguage = jobRequest.ExpectedAudioLanguage,
-                TranslationLanguages = jobRequest.TranslationLanguages
+                TranslationLanguages = jobRequest.TranslationLanguages,
+
+                Status = "Pending",
+                CreatedAt = DateTime.Now,
+                //ScheduledTime = string dateString = "2023-12-31T09:40:00";
+                //ScheduledTime = DateTime.Parse(dateString),
+                ScheduledTime = DateTime.ParseExact(jobRequest.BroadcastStartTime, "yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)
             };
 
             await _jobsCollection.InsertOneAsync(newJob);
         }
-        public async Task<XXXInsightJobEntity> GetJobStatusAsync(string jobId)
+        public async Task<JobRequestEntity> GetJobStatusAsync(string jobId)
         {
             return await _jobsCollection.Find(entry => entry.Id == jobId).FirstOrDefaultAsync();
         }
+        public async Task<List<JobRequestEntity>> GetAllPendingJobsAsync()
+        {
+            var now = DateTime.UtcNow;
+            var filter = Builders<JobRequestEntity>.Filter.And(
+                Builders<JobRequestEntity>.Filter.Eq(j => j.Status, "Pending"),
+                Builders<JobRequestEntity>.Filter.Lte(j => j.ScheduledTime, now)
+            );
+            return await _jobsCollection.Find(filter).ToListAsync();
+        }
         public Task<List<JobRequest>> GetUnfinishedJobsAsync()
+        {
+            throw new NotImplementedException();
+        }
+        public async Task UpdateJobStatusAsync(JobRequestEntity job, string status)
+        {
+            var filter = Builders<JobRequestEntity>.Filter.Eq(j => j.Id, job.Id);
+            var update = Builders<JobRequestEntity>.Update.Set(j => j.Status, status);
+            await _jobsCollection.UpdateOneAsync(filter, update);
+        }
+        public async Task ScheduleNextOccurrenceAsync(JobRequestEntity job)
+        {
+            job.ScheduledTime = GetNextScheduledTime(job);
+            var filter = Builders<JobRequestEntity>.Filter.Eq(j => j.Id, job.Id);
+            await _jobsCollection.ReplaceOneAsync(filter, job);
+        }
+        private DateTime GetNextScheduledTime(JobRequestEntity job)
+        {
+            return DateTime.Now;
+        }
+        Task<List<JobRequestEntity>> IXXXJobRepository.GetUnfinishedJobsAsync()
         {
             throw new NotImplementedException();
         }

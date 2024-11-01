@@ -131,7 +131,9 @@ public class Program
 
         builder.Services.AddSingleton<IXXXOperationsService, XXXOperationsService>();
 
-        builder.Services.AddSingleton<IXXXJobScheduler, XXXJobScheduler>();
+        builder.Services.AddSingleton<IXXXHangfireJobSchedulerService, XXXHangfireJobSchedulerService>();
+
+        builder.Services.AddSingleton<ICustomJobSchedulerService, CustomJobSchedulerService>();
 
         builder.Services.AddSingleton<IXXXJobRepository, XXXJobRepository>();
 
