@@ -26,8 +26,8 @@ namespace HangfireTest.Services
         }
         public async Task<JobResponse> ScheduleJobAsync(JobRequestEntity jobRequest)
         {
-            await _hangfireJobSchedulerService.ScheduleJobAsync(jobRequest);
-            //await _customJobSchedulerService.ScheduleJobAsync(jobRequest);
+            //await _hangfireJobSchedulerService.ScheduleJobAsync(jobRequest);
+            await _customJobSchedulerService.ScheduleJobAsync(jobRequest);
             return new JobResponse { JobRequest = jobRequest, Status = "Success" };
         }
         //public async Task<JobRequestEntity> GetJobStatusAsync(string jobId)

@@ -38,7 +38,7 @@ namespace HangfireTest.Repositories
         Task CreateJobAsync(JobRequestEntity jobRequest);
         Task<JobRequestEntity> GetJobStatusAsync(string jobId);
         Task<List<JobRequestEntity>> GetUnfinishedJobsAsync();
-        Task<List<JobRequestEntity>> GetAllPendingJobsAsync();
+        Task<List<JobRequestEntity>> GetJobsByStatusAsync(string status);
         Task UpdateJobStatusAsync(JobRequestEntity job, string status);
     }
     public class XXXJobRepository : IXXXJobRepository
@@ -93,14 +93,17 @@ namespace HangfireTest.Repositories
         {
             return await _jobsCollection.Find(entry => entry.Id == jobId).FirstOrDefaultAsync();
         }
-        public async Task<List<JobRequestEntity>> GetAllPendingJobsAsync()
+        public async Task<List<JobRequestEntity>> GetJobsByStatusAsync(string status)
         {
-            var now = DateTime.Now;
-            var filter = Builders<JobRequestEntity>.Filter.And(
-                Builders<JobRequestEntity>.Filter.Eq(j => j.Status, "Pending"),
-                Builders<JobRequestEntity>.Filter.Lte(j => j.ScheduledTime, now)
-            );
+            var filter = Builders<JobRequestEntity>.Filter.Eq(j => j.Status, status);
             return await _jobsCollection.Find(filter).ToListAsync();
+
+            //var now = DateTime.Now;
+            //var filter = Builders<JobRequestEntity>.Filter.And(
+            //    Builders<JobRequestEntity>.Filter.Eq(j => j.Status, status),
+            //    Builders<JobRequestEntity>.Filter.Lte(j => j.ScheduledTime, now)
+            //);
+            //return await _jobsCollection.Find(filter).ToListAsync();
         }
         public Task<List<JobRequestEntity>> GetUnfinishedJobsAsync()
         {

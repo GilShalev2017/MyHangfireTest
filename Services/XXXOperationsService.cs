@@ -48,7 +48,7 @@ namespace HangfireTest.Services
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger(); // NLog logger
         private static readonly Dictionary<string, string> languageIds = new();
         private static string inputFilesDirectory = @"C:\Development\HangfireTest\Media\Record";
-        private static List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
+        //private static List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
         //private readonly IAccountManagerConnector _accountManagerConnector;
         //private static HttpClient _httpClient = new HttpClient();
         //private readonly EmailService _emailService;
@@ -267,13 +267,15 @@ namespace HangfireTest.Services
             // Return false if the file timestamp doesn't match or couldn't be parsed
             return false;
         }
-        public Task MonitorAndProcessNewFiles(JobRequestEntity jobRequest)
+        public async Task MonitorAndProcessNewFiles(JobRequestEntity jobRequest)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
             Logger.Debug($"Starting real-time processing for Rule ID: {jobRequest.Id}");
 
             // Convert the endTime from string to DateTime and add 6 minutes
             DateTime endTime = DateTime.ParseExact(jobRequest.BroadcastEndTime, "yyyy_MM_dd_HH_mm_ss", CultureInfo.InvariantCulture).AddMinutes(6);
+
+            List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
 
             foreach (var channel in jobRequest.Channels)
             {
@@ -298,11 +300,19 @@ namespace HangfireTest.Services
                 watchers.Add(watcher);
             }
 
+            while (DateTime.Now < endTime)
+            {
+                await Task.Delay(60000); // Check every minute
+            }
+            foreach (var watcher in watchers)
+            {
+                watcher.EnableRaisingEvents = false; // Disable events
+                watcher.Dispose(); // Dispose of the watcher
+            }
             stopwatch.Stop();
             var elapsedMinutes = stopwatch.ElapsedMilliseconds / 60000.0;
             Logger.Debug($"Finished real-time processing for Rule ID: {jobRequest.Id}, Elapsed Time: {elapsedMinutes} minutes");
 
-            return Task.CompletedTask;
         }
         public async Task MixJobProcessing(JobRequestEntity jobRequest)
         {
@@ -327,7 +337,7 @@ namespace HangfireTest.Services
             }
             catch (Exception ex)
             {
-                Logger.Debug($"[OnNewFileCreated] Error processing file {filePath}: {ex.Message}");
+                Logger.Error($"[OnNewFileCreated] Error processing file {filePath}: {ex.Message}");
             }
         }
         private async Task WaitForFileReady(string filePath)
@@ -419,8 +429,8 @@ namespace HangfireTest.Services
             }
             catch (Exception ex)
             {
-                Logger.Debug($"[ProcessFileAsync] Error processing {mp4FilePath}: {ex.Message}");
-                Logger.Debug($"[ProcessFileAsync] Stack Trace: {ex.StackTrace}");
+                Logger.Error($"[ProcessFileAsync] Error processing {mp4FilePath}: {ex.Message}");
+                Logger.Error($"[ProcessFileAsync] Stack Trace: {ex.StackTrace}");
             }
         }
 
@@ -609,6 +619,7 @@ namespace HangfireTest.Services
             }
             catch (Exception ex)
             {
+                Logger.Error($"SaveTranscriptionAsClosedCaptionsAsync failed: {ex.Message} stack: {ex.StackTrace}");
                 throw new Exception($"error: SaveTranscriptionAsClosedCaptionsAsync {ex.Message}");
             }
         }
