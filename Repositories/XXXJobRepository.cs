@@ -10,7 +10,7 @@ using System.Globalization;
 
 namespace HangfireTest.Repositories
 {
-    public class JobRequestEntity
+    public class JobRequestEntity 
     {
         public required string Name { get; set; }
         public required bool IsRealTime { get; set; }
@@ -35,10 +35,11 @@ namespace HangfireTest.Repositories
     }
     public interface IXXXJobRepository
     {
-        Task CreateJobAsync(JobRequest jobRequest);
+        Task CreateJobAsync(JobRequestEntity jobRequest);
         Task<JobRequestEntity> GetJobStatusAsync(string jobId);
         Task<List<JobRequestEntity>> GetUnfinishedJobsAsync();
         Task<List<JobRequestEntity>> GetAllPendingJobsAsync();
+        Task UpdateJobStatusAsync(JobRequestEntity job, string status);
     }
     public class XXXJobRepository : IXXXJobRepository
     {
@@ -51,7 +52,7 @@ namespace HangfireTest.Repositories
            
             _jobsCollection = database.GetCollection<JobRequestEntity>(CollectionName);
         }
-        public async Task CreateJobAsync(JobRequest jobRequest)
+        public async Task CreateJobAsync(JobRequestEntity jobRequest)
         {
             // Define the format that matches the file timestamp
             string format = "yyyy_MM_dd_HH_mm_ss";
@@ -94,14 +95,14 @@ namespace HangfireTest.Repositories
         }
         public async Task<List<JobRequestEntity>> GetAllPendingJobsAsync()
         {
-            var now = DateTime.UtcNow;
+            var now = DateTime.Now;
             var filter = Builders<JobRequestEntity>.Filter.And(
                 Builders<JobRequestEntity>.Filter.Eq(j => j.Status, "Pending"),
                 Builders<JobRequestEntity>.Filter.Lte(j => j.ScheduledTime, now)
             );
             return await _jobsCollection.Find(filter).ToListAsync();
         }
-        public Task<List<JobRequest>> GetUnfinishedJobsAsync()
+        public Task<List<JobRequestEntity>> GetUnfinishedJobsAsync()
         {
             throw new NotImplementedException();
         }

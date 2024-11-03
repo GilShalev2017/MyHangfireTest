@@ -1,5 +1,6 @@
 using Docker.DotNet.Models;
 using HangfireTest.Models;
+using HangfireTest.Repositories;
 using HangfireTest.Services;
 using Microsoft.AspNetCore.Mvc;
 using NLog;
@@ -18,7 +19,7 @@ namespace HangfireTest.Controllers
         }
 
         [HttpPost("schedule")]
-        public async Task<IActionResult> ScheduleJob([FromBody] JobRequest jobRequest)
+        public async Task<IActionResult> ScheduleJob([FromBody] JobRequestEntity jobRequest)
         {
             //TODO validate request
             if (jobRequest == null)
@@ -38,7 +39,7 @@ namespace HangfireTest.Controllers
 
             return BadRequest(jobResponse.Errors);
         }
-        private void PrintJobRequest(JobRequest jobRequest)
+        private void PrintJobRequest(JobRequestEntity jobRequest)
         {
             string logMessage = $"Received JobRequest:\n" +
                                 $"- Name: {jobRequest.Name}\n" +

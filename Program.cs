@@ -23,6 +23,7 @@ using HangfireTest.Services;
 using HangfireTest.Repositories;
 using MongoDB.Driver;
 using ActIntelligenceService.Connectors;
+using Microsoft.Extensions.DependencyInjection;
 
 public class Program
 {
@@ -135,6 +136,9 @@ public class Program
 
         builder.Services.AddSingleton<ICustomJobSchedulerService, CustomJobSchedulerService>();
 
+        //builder.Services.AddHostedService<CustomJobSchedulerService>(provider =>
+        //             (CustomJobSchedulerService)provider.GetRequiredService<ICustomJobSchedulerService>());
+
         builder.Services.AddSingleton<IXXXJobRepository, XXXJobRepository>();
 
         builder.Services.AddSingleton<IXXXJobService, XXXJobService>();
@@ -158,6 +162,8 @@ public class Program
         builder.Services.AddSingleton<IXXXJobRepository, XXXJobRepository>();
 
         var app = builder.Build();
+
+        app.Services.GetService<ICustomJobSchedulerService>();
 
         app.UseHangfireDashboard();
 

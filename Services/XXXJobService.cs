@@ -6,7 +6,7 @@ namespace HangfireTest.Services
 {
     public interface IXXXJobService
     {
-        Task<JobResponse> ScheduleJobAsync(JobRequest jobRequest);
+        Task<JobResponse> ScheduleJobAsync(JobRequestEntity jobRequest);
         //Task<JobRequestEntity> GetJobStatusAsync(string jobId);
         //Task RecoverUnfinishedJobsAsync();  // Recover jobs after system restart
         //Task ProcessExistingFilesAsync(BulkProcessRequest request);
@@ -24,10 +24,10 @@ namespace HangfireTest.Services
             _hangfireJobSchedulerService = hangfireJobSchedulerService;
             _customJobSchedulerService = customJobSchedulerService;
         }
-        public async Task<JobResponse> ScheduleJobAsync(JobRequest jobRequest)
+        public async Task<JobResponse> ScheduleJobAsync(JobRequestEntity jobRequest)
         {
             await _hangfireJobSchedulerService.ScheduleJobAsync(jobRequest);
-            //await _hangfireJobSchedulerService.ScheduleJobAsync(jobRequest);
+            //await _customJobSchedulerService.ScheduleJobAsync(jobRequest);
             return new JobResponse { JobRequest = jobRequest, Status = "Success" };
         }
         //public async Task<JobRequestEntity> GetJobStatusAsync(string jobId)

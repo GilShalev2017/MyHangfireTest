@@ -7,7 +7,7 @@ namespace HangfireTest.Services
 {
     public interface ICustomJobSchedulerService
     {
-        Task ScheduleJobAsync(JobRequest jobRequest);
+        Task ScheduleJobAsync(JobRequestEntity jobRequest);
     }
     public class CustomJobSchedulerService: ICustomJobSchedulerService
     {
@@ -19,49 +19,55 @@ namespace HangfireTest.Services
         {
             _jobsRepository = jobsRepository;
             _xxxOperationsService = operationsService;
-          //  _timer = new Timer(CheckAndRunJobs, null, TimeSpan.Zero, TimeSpan.FromSeconds(30)); // adjust interval as needed
+            _timer = new Timer(CheckAndRunJobsAsync, null, TimeSpan.Zero, TimeSpan.FromSeconds(30)); // adjust interval as needed
         }
 
-        private async void CheckAndRunJobs(object state)
+        private async void CheckAndRunJobsAsync(object? state)
         {
-            //var jobs = await _jobsRepository.GetAllPendingJobsAsync();
+            var jobs = await _jobsRepository.GetAllPendingJobsAsync();
 
-            //foreach (var job in jobs)
-            //{
-            //    await ExecuteJob(job);
-            //    await UpdateJobStatus(job, "Completed");
-
-            //    // Handle recurring jobs
-            //    if (job.IsRecurring)
-            //    {
-            //        ScheduleNextOccurrence(job);
-            //    }
-            //}
+            foreach (var job in jobs)
+            {
+                await ExecuteJobAsync(job);
+            }
         }
-
-        private async Task ExecuteJob(JobRequest jobRequest)
+        private async Task ExecuteJobAsync(JobRequestEntity job)
         {
-            // Call the appropriate operation
-            //await _xxxOperationsService.PerformOperationAsync(jobRequest.Operations);
+            try
+            {
+                await UpdateJobStatus(job, "In Progress");
+
+                await _xxxOperationsService.ExecuteJobAsync(job);
+
+                await UpdateJobStatus(job, "Completed");
+
+                if (job.IsRecurring)
+                {
+                    ScheduleNextOccurrence(job);
+                }
+            }
+            catch (Exception ex)
+            {
+                await UpdateJobStatus(job, "Failed");
+            }
         }
 
-        private async Task UpdateJobStatus(JobRequest job, string status)
+        private async Task UpdateJobStatus(JobRequestEntity job, string status)
         {
-            //var filter = Builders<JobRequest>.Filter.Eq(j => j.Id, job.Id);
-            //var update = Builders<JobRequest>.Update.Set(j => j.Status, status);
-            //await _jobsCollection.UpdateOneAsync(filter, update);
+            await _jobsRepository.UpdateJobStatusAsync(job, status);
         }
 
-        private void ScheduleNextOccurrence(JobRequest job)
+        private void ScheduleNextOccurrence(JobRequestEntity job)
         {
             // Calculate the next scheduled time based on job's recurrence pattern
             //job.ScheduledTime = job.GetNextScheduledTime();
             //_jobsCollection.ReplaceOne(j => j.Id == job.Id, job);
         }
 
-        public Task ScheduleJobAsync(JobRequest jobRequest)
+        public async Task ScheduleJobAsync(JobRequestEntity jobRequest)
         {
-            throw new NotImplementedException();
+            await _jobsRepository.CreateJobAsync(jobRequest);
         }
+        
     }
 }

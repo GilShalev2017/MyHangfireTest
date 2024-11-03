@@ -18,18 +18,26 @@ using ActIntelligenceService.Domain.Models.AIClip;
 using Microsoft.AspNetCore.Hosting.Server;
 using ActInfra;
 using Microsoft.AspNetCore.Mvc;
+using HangfireTest.Repositories;
+using Hangfire;
+using Microsoft.Extensions.FileSystemGlobbing;
 
 namespace HangfireTest.Services
 {
     public interface IXXXOperationsService
     {
+        Task ExecuteJobAsync(JobRequestEntity job);
+        InvocationType GetInvocationType(JobRequestEntity jobRequest);
+        Task ProcessExistingFiles(JobRequestEntity job);
+        Task MonitorAndProcessNewFiles(JobRequestEntity jobRequest);
+        Task MixJobProcessing(JobRequestEntity jobRequest);
         Task<string> ExtractAudioAsync(string videoFilePath);
         bool IsExtractionSucceeded(string mp3File);
         Task /*<FaceDetectionResult>*/ DetectFacesAsync(string filePath);
         Task /*<LogoDetectionResult>*/ DetectLogosAsync(string filePath);
         Task<InsightResult> TranscribeFileAsync(string audioFilePath, string sttFile);
-        Task TranslateTranscriptionAsync(JobRequest jobRequest, string channel, InsightResult sttInsightResult, string sttJsonFile);
-        Task DetectKeywordsAsync(JobRequest jobRequest, InsightResult insightResult, string channel, string sttJsonFile);
+        Task TranslateTranscriptionAsync(JobRequestEntity jobRequest, string channel, InsightResult sttInsightResult, string sttJsonFile);
+        Task DetectKeywordsAsync(JobRequestEntity jobRequest, InsightResult insightResult, string channel, string sttJsonFile);
         Task SaveTranscriptionAsClosedCaptionsAsync(InsightResult sttInsightResult, string audioFilePath, string outputFolderPath, string channel);
         //Task<LanguageDetectionResult> DetectAudioLanguageAsync(string filePath);
         //Task<UnexpectedLanguageResult> DetectUnexpectedLanguageAsync(string filePath, string expectedLanguage);
@@ -39,6 +47,8 @@ namespace HangfireTest.Services
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger(); // NLog logger
         private static readonly Dictionary<string, string> languageIds = new();
+        private static string inputFilesDirectory = @"C:\Development\HangfireTest\Media\Record";
+        private static List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
         //private readonly IAccountManagerConnector _accountManagerConnector;
         //private static HttpClient _httpClient = new HttpClient();
         //private readonly EmailService _emailService;
@@ -59,12 +69,361 @@ namespace HangfireTest.Services
             {
                 foreach (LanguageDm languageDm in list)
                 {
-                    languageIds.Add(languageDm.DisplayName, languageDm.EnglishName!);
+                    if (!languageIds.ContainsKey(languageDm.DisplayName))
+                    {
+                        languageIds.Add(languageDm.DisplayName, languageDm.EnglishName!);
+                    }
                 }
             }
         }
 
         #region IXXXOperationsService
+        public async Task ExecuteJobAsync(JobRequestEntity job)
+        {
+            var invocationType = GetInvocationType(job);
+
+            if (invocationType == InvocationType.Batch)
+            {
+                await ProcessExistingFiles(job);
+            }
+            else if (invocationType == InvocationType.RealTime)
+            {
+                await MonitorAndProcessNewFiles(job);
+            }
+            else if(invocationType == InvocationType.Both)
+            {
+                await MixJobProcessing(job);
+            }
+        }
+        public InvocationType GetInvocationType(JobRequestEntity jobRequest)
+        {
+            // Parse BraodcastStartTime and BroadcastEndTime into DateTime objects
+            DateTime startTime = DateTime.ParseExact(jobRequest.BroadcastStartTime, "yyyy_MM_dd_HH_mm_ss", null);
+            DateTime endTime = DateTime.ParseExact(jobRequest.BroadcastEndTime, "yyyy_MM_dd_HH_mm_ss", null);
+            DateTime currentTime = DateTime.Now;
+
+            InvocationType invocationType = InvocationType.RealTime;
+
+            // Determine the type of job based on the time range and real-time flag
+            if (endTime < currentTime)
+            {
+                // Time range is in the past, so use NotRTPRocessing
+                invocationType = InvocationType.Batch;
+            }
+            else if (jobRequest.IsRealTime)
+            {
+                if (startTime < currentTime && endTime >= currentTime)
+                {
+                    // Part of the time range is in the past and part is in the future
+                    invocationType = InvocationType.Both;  // Process past & future
+                }
+                else if (startTime > currentTime)
+                {
+                    // Entire time range is in the future, use RTProcessing
+                    invocationType = InvocationType.RealTime;
+                }
+            }
+            else
+            {
+                // If the request isn't real-time and the time range is in the future, use NotRTPRocessing
+                invocationType = InvocationType.Batch;
+            }
+
+            return invocationType;
+        }
+        public async Task ProcessExistingFiles(JobRequestEntity job)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+
+            Logger.Debug($"Executing JOB ID: {job.Id}");
+
+            // Loop through each channel
+            await Task.WhenAll(job.Channels.Select(async channel =>
+            {
+                Logger.Debug("Transcribing Channel " + channel);
+
+                var filesInRange = GetFilesForTimeRange(job, channel);
+
+                // Loop through each file in range
+                await Task.WhenAll(filesInRange.Select(async file =>
+                {
+                    if (job.Operations.Contains(Operation.DetectFaces))
+                    {
+                        await DetectFacesAsync(file);
+                    }
+
+                    if (job.Operations.Contains(Operation.DetectLogo))
+                    {
+                        await DetectLogosAsync(file);
+                    }
+
+                    if (job.Operations.Contains(Operation.CreateClosedCaptions) ||
+                       job.Operations.Contains(Operation.DetectKeywords) ||
+                       job.Operations.Contains(Operation.TranslateTranscription) ||
+                       job.Operations.Contains(Operation.VerifyAudioLanguage)
+                    )
+                    {
+                        var mp3File = file.Replace(".mp4", ".mp3");
+
+                        var sttJsonFile = file.Replace(".mp4", ".json");
+
+                        if (!File.Exists(mp3File))
+                        {
+                            mp3File = await ExtractAudioAsync(file);// Convert .mp4 to .mp3
+
+                            if (!IsExtractionSucceeded(mp3File)) // it fails if result .mp3 is less than 5MB
+                                return;
+                        }
+
+                        if (!File.Exists(sttJsonFile)) // Transcribe only if the json file doesn't exist
+                        {
+                            InsightResult insightResult = await TranscribeFileAsync(mp3File, sttJsonFile);
+
+                            if (job.Operations.Contains(Operation.DetectKeywords))
+                            {
+                                await DetectKeywordsAsync(job, insightResult, channel, sttJsonFile);
+                            }
+
+                            if (job.Operations.Contains(Operation.TranslateTranscription))
+                            {
+                                await TranslateTranscriptionAsync(job, channel, insightResult, sttJsonFile);
+                            }
+
+                            if (job.Operations.Contains(Operation.CreateClosedCaptions))
+                            {
+                                var outputFolderPath = Path.Combine(new FileInfo(sttJsonFile).DirectoryName!, "closed_captions"); //TODO should be an inner folder with the LngID name
+                                if (!Directory.Exists(outputFolderPath))
+                                {
+                                    Directory.CreateDirectory(outputFolderPath);
+                                }
+                                await SaveTranscriptionAsClosedCaptionsAsync(insightResult, mp3File, outputFolderPath!, channel);
+                            }
+                        }
+                    }
+                }));
+
+            }));
+
+            stopwatch.Stop();
+
+            var elapsed = stopwatch.ElapsedMilliseconds;
+
+            var elapsedMinutes = stopwatch.ElapsedMilliseconds / 60000.0;
+
+            Logger.Debug($"Finished Executing JOB ID: {job.Id}, Elapsed Time: {elapsedMinutes} minutes");
+        }
+        private IEnumerable<string> GetFilesForTimeRange(JobRequestEntity job, string channel)
+        {
+            var channelFolder = Path.Combine(inputFilesDirectory, channel);
+            var startDateString = DateTime.ParseExact(job.BroadcastStartTime, "yyyy_MM_dd_HH_mm_ss", null).ToString("yyyy_MM_dd");
+            var channelWithDateFolder = Path.Combine(channelFolder, startDateString);
+
+            var allFiles = Directory.GetFiles(channelWithDateFolder, "*.mp4");
+            //foreach ( var file in allFiles)
+            //{
+            //    var res = FileMatchesTimeRange(file, rule.BraodcastStartTime, rule.BroadcastEndTime);
+            //}
+            return allFiles.Where(file => FileMatchesTimeRange(file, job.BroadcastStartTime, job.BroadcastEndTime));
+        }
+        private bool FileMatchesTimeRange(string filePath, string startTime, string endTime)
+        {
+            // Extract the timestamp portion from the file name by skipping the channel name part
+            string fileName = Path.GetFileNameWithoutExtension(filePath);
+
+            // Assuming the channel name ends right before the timestamp, separated by an underscore
+            // Example: channel01_2024_10_07_00_05_00, so we remove the first part
+            var parts = fileName.Split('_');
+
+            // The timestamp starts after the channel name (parts from index 1 onwards)
+            if (parts.Length < 6) return false; // Make sure the file name has the expected format
+
+            // Recreate the timestamp from parts[1] to parts[6]
+            string fileTimestampStr = $"{parts[1]}_{parts[2]}_{parts[3]}_{parts[4]}_{parts[5]}_{parts[6]}";
+
+            // Define the format that matches the file timestamp
+            string format = "yyyy_MM_dd_HH_mm_ss";
+
+            // Attempt to parse the file timestamp into a DateTime object
+            if (DateTime.TryParseExact(fileTimestampStr, format, null, System.Globalization.DateTimeStyles.None, out DateTime fileTimestamp))
+            {
+                // Convert startTime and endTime strings into DateTime objects
+                if (DateTime.TryParseExact(startTime, format, null, System.Globalization.DateTimeStyles.None, out DateTime startDateTime) &&
+                    DateTime.TryParseExact(endTime, format, null, System.Globalization.DateTimeStyles.None, out DateTime endDateTime))
+                {
+                    // Handle cases where the time range spans multiple days
+                    if (startDateTime <= endDateTime)
+                    {
+                        // Check if the file timestamp is within the specified time range
+                        return fileTimestamp >= startDateTime && fileTimestamp <= endDateTime;
+                    }
+                    else
+                    {
+                        // If the end time is before the start time, it means the range spans multiple days
+                        return fileTimestamp >= startDateTime || fileTimestamp <= endDateTime;
+                    }
+                }
+            }
+
+            // Return false if the file timestamp doesn't match or couldn't be parsed
+            return false;
+        }
+        public Task MonitorAndProcessNewFiles(JobRequestEntity jobRequest)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            Logger.Debug($"Starting real-time processing for Rule ID: {jobRequest.Id}");
+
+            // Convert the endTime from string to DateTime and add 6 minutes
+            DateTime endTime = DateTime.ParseExact(jobRequest.BroadcastEndTime, "yyyy_MM_dd_HH_mm_ss", CultureInfo.InvariantCulture).AddMinutes(6);
+
+            foreach (var channel in jobRequest.Channels)
+            {
+                string channelPath = Path.Combine(inputFilesDirectory, channel);
+
+                FileSystemWatcher watcher = new()
+                {
+                    Path = channelPath,
+                    Filter = "*.mp4",
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.CreationTime,
+                    IncludeSubdirectories = true
+                };
+
+                watcher.Created += async (sender, e) =>
+                {
+                    Logger.Debug($"New file detected: {e.FullPath} at {DateTime.Now}");
+                    await OnNewFileCreated(e.FullPath, jobRequest, channel);
+                };
+
+                watcher.EnableRaisingEvents = true;
+
+                watchers.Add(watcher);
+            }
+
+            stopwatch.Stop();
+            var elapsedMinutes = stopwatch.ElapsedMilliseconds / 60000.0;
+            Logger.Debug($"Finished real-time processing for Rule ID: {jobRequest.Id}, Elapsed Time: {elapsedMinutes} minutes");
+
+            return Task.CompletedTask;
+        }
+        public async Task MixJobProcessing(JobRequestEntity jobRequest)
+        {
+            await ProcessExistingFiles(jobRequest);
+
+            await MonitorAndProcessNewFiles(jobRequest);//, CancellationToken.None);
+        }
+        private async Task OnNewFileCreated(string filePath, JobRequestEntity jobRequest, string channel)
+        {
+            try
+            {
+                Logger.Debug($"[OnNewFileCreated] File detected: {filePath} at {DateTime.Now}");
+
+                // Wait until the file is ready for processing
+                Logger.Debug($"[OnNewFileCreated] Waiting for file to be ready: {filePath}");
+
+                await WaitForFileReady(filePath);
+
+                Logger.Debug($"[OnNewFileCreated] File is ready: {filePath}");
+
+                await ProcessFileAsync(filePath, jobRequest, channel);
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[OnNewFileCreated] Error processing file {filePath}: {ex.Message}");
+            }
+        }
+        private async Task WaitForFileReady(string filePath)
+        {
+            int retries = 10;
+
+            int delay = 1000;
+
+            for (int i = 0; i < retries; i++)
+            {
+                if (FileIsReady(filePath))
+                {
+                    return;
+                }
+
+                Logger.Debug($"File {filePath} is not ready. Waiting for {delay}ms before retrying.");
+
+                await Task.Delay(delay);
+            }
+
+            throw new Exception($"File {filePath} is still not ready after multiple attempts.");
+        }
+        private bool FileIsReady(string filePath)
+        {
+            try
+            {
+                using FileStream fs = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.None);
+
+                return true;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+        }
+        private async Task ProcessFileAsync(string mp4FilePath, JobRequestEntity jobRequest, string channel)
+        {
+            try
+            {
+                var stopwatch = Stopwatch.StartNew();
+
+                var mp3File = await ExtractAudioAsync(mp4FilePath);
+
+                Logger.Debug($"Audio extraction took: {stopwatch.Elapsed.TotalSeconds} seconds");
+
+                var sttFile = mp3File.Replace(".mp3", ".json");
+
+                InsightResult insightResult = await TranscribeFileAsync(mp3File, sttFile);
+
+                Logger.Debug($"Transcription took: {stopwatch.Elapsed.TotalSeconds} seconds");
+
+                //parallelized invocation of RunKeywordsDetection and an RunTranslation
+                if (jobRequest.Operations.Contains(Operation.DetectKeywords) &&
+                    jobRequest.Operations.Contains(Operation.TranslateTranscription) &&
+                    jobRequest.Operations.Contains(Operation.CreateClosedCaptions))
+                {
+                    var outputFolderPath = Path.Combine(new FileInfo(sttFile).DirectoryName!, "closed_captions"); //TODO should be an inner folder with the LngID name
+                    if (!Directory.Exists(outputFolderPath))
+                    {
+                        Directory.CreateDirectory(outputFolderPath);
+                    }
+
+                    await Task.WhenAll(
+                        DetectKeywordsAsync(jobRequest, insightResult, channel, sttFile),
+                        TranslateTranscriptionAsync(jobRequest, channel, insightResult, sttFile),
+                        SaveTranscriptionAsClosedCaptionsAsync(insightResult, mp3File, outputFolderPath!, channel)
+                    );
+                }
+                else if (jobRequest.Operations.Contains(Operation.DetectKeywords))
+                {
+                    await DetectKeywordsAsync(jobRequest, insightResult, channel, sttFile);
+                }
+                else if (jobRequest.Operations.Contains(Operation.TranslateTranscription))
+                {
+                    await TranslateTranscriptionAsync(jobRequest, channel, insightResult, sttFile);
+                }
+                else if (jobRequest.Operations.Contains(Operation.CreateClosedCaptions))
+                {
+                    var outputFolderPath = Path.Combine(new FileInfo(sttFile).DirectoryName!, "closed_captions"); //TODO should be an inner folder with the LngID name
+                    if (!Directory.Exists(outputFolderPath))
+                    {
+                        Directory.CreateDirectory(outputFolderPath);
+                    }
+                    await SaveTranscriptionAsClosedCaptionsAsync(insightResult, mp3File, outputFolderPath!, channel);
+                }
+
+                stopwatch.Stop();
+                Logger.Debug($"Total processing time for {mp4FilePath}: {stopwatch.Elapsed.TotalSeconds} seconds");
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[ProcessFileAsync] Error processing {mp4FilePath}: {ex.Message}");
+                Logger.Debug($"[ProcessFileAsync] Stack Trace: {ex.StackTrace}");
+            }
+        }
+
         public async Task<string> ExtractAudioAsync(string videoFilePath)
         {
             var audioFilePath = videoFilePath.Replace(".mp4", ".mp3");
@@ -147,7 +506,7 @@ namespace HangfireTest.Services
 
             return insightResult!;
         }
-        public async Task TranslateTranscriptionAsync(JobRequest jobRequest, string channel, InsightResult sttInsightResult, string sttJsonFile)
+        public async Task TranslateTranscriptionAsync(JobRequestEntity jobRequest, string channel, InsightResult sttInsightResult, string sttJsonFile)
         {
             if (jobRequest.TranslationLanguages == null || jobRequest.ExpectedAudioLanguage == null)
             {
@@ -172,11 +531,11 @@ namespace HangfireTest.Services
 
             await Task.WhenAll(translationTasks);
         }
-        public async Task DetectKeywordsAsync(JobRequest jobRequest, InsightResult insightResult, string channel, string sttJsonFile)
+        public async Task DetectKeywordsAsync(JobRequestEntity job, InsightResult insightResult, string channel, string sttJsonFile)
         {
-            if (jobRequest.Keywords != null && jobRequest.Keywords.Count > 0)
+            if (job.Keywords != null && job.Keywords.Count > 0)
             {
-                var keywordMatches = await FindKeywordsAsync(insightResult, jobRequest.Keywords, channel, sttJsonFile);
+                var keywordMatches = await FindKeywordsAsync(insightResult, job.Keywords, channel, sttJsonFile);
 
                 if (keywordMatches.Count > 0)
                 {
