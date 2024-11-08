@@ -48,14 +48,16 @@ namespace HangfireTest.Services
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger(); // NLog logger
         private static readonly Dictionary<string, string> languageIds = new();
         private static string inputFilesDirectory = @"C:\Development\HangfireTest\Media\Record";
+        private readonly IXXXJobRepository _jobsRepository;
         //private static List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
         //private readonly IAccountManagerConnector _accountManagerConnector;
         //private static HttpClient _httpClient = new HttpClient();
         //private readonly EmailService _emailService;
 
-        public XXXOperationsService()//EmailService emailService)//IAccountManagerConnector accountManagerConnector)
+        public XXXOperationsService(IXXXJobRepository jobsRepository)//EmailService emailService)//IAccountManagerConnector accountManagerConnector)
         {
             InitProvidersEnvironment();
+            _jobsRepository = jobsRepository;
             //_emailService = emailService;
             //_accountManagerConnector = new AccountManagerConnector(null, new HttpClient());
         }
@@ -510,10 +512,10 @@ namespace HangfireTest.Services
             Logger.Debug($"[TranscribeFileAsync] Starting transcription for: {audioFilePath} at {DateTime.Now}");
 
             //OpenAI Transcriber
-            //var insightResult = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.OpenAI, audioFilePath);
+            var insightResult = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.OpenAI, audioFilePath);
           
             //Whisper Transcriber
-            var insightResult = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.Whisper, audioFilePath);
+            //var insightResult = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.Whisper, audioFilePath);
 
             await SaveInsightToFileAsync(insightResult!, sttFile);
 
@@ -555,7 +557,7 @@ namespace HangfireTest.Services
                 if (keywordMatches.Count > 0)
                 {
                     string keywordFile = sttJsonFile.Replace(".json", "_keywords.json");
-                    await SaveKeywordMatchesToFileAsync(keywordFile, keywordMatches);
+                    await SaveKeywordMatchesAsync(channel, job,keywordFile, keywordMatches);
                 }
                 //foreach (var keywordMatch in keywordMatches)
                 //{
@@ -563,6 +565,19 @@ namespace HangfireTest.Services
                 //    SendKeywordNotificationEmail(keywordMatch, channel,"gilshalev@actusdigital.com");
                 //}
             }
+        }
+        private string ExtractTimestamp(string filePath)
+        {
+            // Get the file name from the full path
+            string fileName = Path.GetFileNameWithoutExtension(filePath);
+
+            // Split by underscores
+            string[] parts = fileName.Split('_');
+
+            // Join the parts that form the timestamp (index 1 to 6)
+            string timestamp = string.Join("_", parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]);
+
+            return timestamp;
         }
         public async Task SaveTranscriptionAsClosedCaptionsAsync(InsightResult sttInsightResult, string audioFilePath, string outputFolderPath, string channel)
         {
@@ -687,7 +702,25 @@ namespace HangfireTest.Services
 
             return keywordMatches;
         }
-        private static async Task SaveKeywordMatchesToFileAsync(string filePath, List<KeywordMatch> keywordMatches)
+        //private async Task SaveKeywordMatchesAsync(string channel, JobRequestEntity job, string filePath, List<KeywordMatch> keywordMatches)
+        //{
+        //    var options = new JsonSerializerOptions
+        //    {
+        //        WriteIndented = true
+        //    };
+
+        //    // Serialize the keyword matches list to JSON
+        //    string jsonString = JsonSerializer.Serialize(keywordMatches, options);
+
+        //    // Write the JSON string to a file
+        //    await File.WriteAllTextAsync(filePath, jsonString);
+
+        //   //Add channel 5 minutes results to the job operation results dictionary
+        //   job.ChannelOperationResults.Add...
+
+        //    await _jobsRepository.SaveOperationResult(job);
+        //}
+        private async Task SaveKeywordMatchesAsync(string channel, JobRequestEntity job, string filePath, List<KeywordMatch> keywordMatches)
         {
             var options = new JsonSerializerOptions
             {
@@ -699,7 +732,33 @@ namespace HangfireTest.Services
 
             // Write the JSON string to a file
             await File.WriteAllTextAsync(filePath, jsonString);
+
+            // Define a timestamp for this segment (e.g., "00:00-05:00")
+            string timestamp = ExtractTimestamp(filePath);
+
+            // Initialize the structure if necessary
+            if (!job.ChannelOperationResults.ContainsKey(channel))
+            {
+                job.ChannelOperationResults[channel] = new Dictionary<string, List<KeywordMatchSegment>>();
+            }
+
+            if (!job.ChannelOperationResults[channel].ContainsKey("DetectKeywords"))
+            {
+                job.ChannelOperationResults[channel]["DetectKeywords"] = new List<KeywordMatchSegment>();
+            }
+
+            // Create the segment data and add it to ChannelOperationResults
+            var segmentData = new KeywordMatchSegment
+            {
+                Timestamp = timestamp,
+                Results = keywordMatches
+            };
+
+            job.ChannelOperationResults[channel]["DetectKeywords"].Add(segmentData);
+
+            await _jobsRepository.SaveOperationResult(job);
         }
+
         private static async Task SaveInsightToFileAsync(InsightResult insightResult, string filePath)
         {
             // Trim leading and trailing whitespaces in the Text property

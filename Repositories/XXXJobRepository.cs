@@ -7,10 +7,11 @@ using MongoDB.Driver;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Http;
 using System.Globalization;
+using ActIntelligenceService.Domain.Models.AIClip;
 
 namespace HangfireTest.Repositories
 {
-    public class JobRequestEntity 
+    public class JobRequestEntity
     {
         public required string Name { get; set; }
         public required bool IsRealTime { get; set; }
@@ -23,8 +24,10 @@ namespace HangfireTest.Repositories
         public required string BroadcastEndTime { get; set; }
         public List<string>? Keywords { get; set; } = new List<string>();
         public required List<string> Operations { get; set; } = new List<string>();
+        public Dictionary<string, Dictionary<string, List<KeywordMatchSegment>>> ChannelOperationResults { get; set; } = new Dictionary<string, Dictionary<string, List<KeywordMatchSegment>>>();
         public string? ExpectedAudioLanguage { get; set; }
         public List<string>? TranslationLanguages { get; set; }
+        public List<string> NotificationIds { get; set; } = new List<string>();
 
         [BsonId]
         [BsonRepresentation(BsonType.ObjectId)]
@@ -42,6 +45,8 @@ namespace HangfireTest.Repositories
         Task<List<JobRequestEntity>> GetUnfinishedJobsAsync();
         Task<List<JobRequestEntity>> GetJobsByStatusAsync(string status);
         Task UpdateJobStatusAsync(JobRequestEntity job, string status);
+        Task SaveOperationResult(JobRequestEntity job);
+        Task SaveOperationResultForChannel(string jobId, string channelName, string operationName, object segmentResult);
     }
     public class XXXJobRepository : IXXXJobRepository
     {
@@ -51,7 +56,7 @@ namespace HangfireTest.Repositories
         public XXXJobRepository(IMongoClient mongoClient)
         {
             var database = mongoClient.GetDatabase("ActusIntelligenceTest");
-           
+
             _jobsCollection = database.GetCollection<JobRequestEntity>(CollectionName);
         }
         public async Task CreateJobAsync(JobRequestEntity jobRequest)
@@ -83,9 +88,10 @@ namespace HangfireTest.Repositories
                     Operations = jobRequest.Operations,
                     ExpectedAudioLanguage = jobRequest.ExpectedAudioLanguage,
                     TranslationLanguages = jobRequest.TranslationLanguages,
-
+                    NotificationIds = jobRequest.NotificationIds,
                     Status = "Pending",
                     CreatedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"),
+                    CreatedBy = "Administrator",
                     NextScheduledTime = DateTime.SpecifyKind(scheduledTime, DateTimeKind.Utc)
                 };
 
@@ -136,5 +142,30 @@ namespace HangfireTest.Repositories
         {
             throw new NotImplementedException();
         }
+        public async Task SaveOperationResult(JobRequestEntity job)
+        {
+            var filter = Builders<JobRequestEntity>.Filter.Eq(j => j.Id, job.Id);
+
+            // Set ChannelOperationResults directly to update the document
+            var update = Builders<JobRequestEntity>.Update.Set(j => j.ChannelOperationResults, job.ChannelOperationResults);
+
+            await _jobsCollection.FindOneAndUpdateAsync(filter, update);
+        }
+
+        public async Task SaveOperationResultForChannel(string jobId, string channelName, string operationName, object segmentResult)
+        {
+            // Filter to find the job by its Id
+            var filter = Builders<JobRequestEntity>.Filter.Eq(j => j.Id, jobId);
+
+            // Define the path to the specific channel and operation
+            var updatePath = $"ChannelOperationResults.{channelName}.{operationName}";
+
+            // Update definition to add the segment result to the specified channel and operation
+            var update = Builders<JobRequestEntity>.Update.Push(updatePath, segmentResult);
+
+            // Use FindOneAndUpdateAsync to apply the update
+            await _jobsCollection.FindOneAndUpdateAsync(filter, update);
+        }
+
     }
 }
