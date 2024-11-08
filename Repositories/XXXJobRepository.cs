@@ -18,6 +18,7 @@ namespace HangfireTest.Repositories
         public string? ExecutionTime { get; set; }
         public string? CronExpression { get; set; } //Cron time for example: "14 15 * * *" <-when to invoke the processing every day! the format is:"mm hh * * *"
         public List<string> Channels { get; set; } = new List<string>();
+        public List<int> ChannelIds { get; set; } = new List<int>();
         public required string BroadcastStartTime { get; set; }
         public required string BroadcastEndTime { get; set; }
         public List<string>? Keywords { get; set; } = new List<string>();
@@ -29,7 +30,7 @@ namespace HangfireTest.Repositories
         [BsonRepresentation(BsonType.ObjectId)]
         public string? Id { get; set; }
         public string? Status { get; set; } //pending, succeded, failed
-        public DateTime? ScheduledTime { get; set; }
+        public DateTime? NextScheduledTime { get; set; }
         public string? CreatedAt { get; set; }
         public string? CreatedBy { get; set; }
     }
@@ -37,6 +38,7 @@ namespace HangfireTest.Repositories
     {
         Task CreateJobAsync(JobRequestEntity jobRequest);
         Task<JobRequestEntity> GetJobStatusAsync(string jobId);
+        Task<List<JobRequestEntity>> GetAllJobsAsync();
         Task<List<JobRequestEntity>> GetUnfinishedJobsAsync();
         Task<List<JobRequestEntity>> GetJobsByStatusAsync(string status);
         Task UpdateJobStatusAsync(JobRequestEntity job, string status);
@@ -74,6 +76,7 @@ namespace HangfireTest.Repositories
                     CronExpression = jobRequest.CronExpression,
                     Id = jobRequest.Id,
                     Channels = jobRequest.Channels,
+                    ChannelIds = jobRequest.ChannelIds,
                     BroadcastStartTime = jobRequest.BroadcastStartTime,
                     BroadcastEndTime = jobRequest.BroadcastEndTime,
                     Keywords = jobRequest.Keywords,
@@ -83,11 +86,15 @@ namespace HangfireTest.Repositories
 
                     Status = "Pending",
                     CreatedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"),
-                    ScheduledTime = DateTime.SpecifyKind(scheduledTime, DateTimeKind.Utc)
+                    NextScheduledTime = DateTime.SpecifyKind(scheduledTime, DateTimeKind.Utc)
                 };
 
                 await _jobsCollection.InsertOneAsync(newJob);
             }
+        }
+        public async Task<List<JobRequestEntity>> GetAllJobsAsync()
+        {
+            return await _jobsCollection.Find(Builders<JobRequestEntity>.Filter.Empty).ToListAsync();
         }
         public async Task<JobRequestEntity> GetJobStatusAsync(string jobId)
         {
@@ -101,7 +108,7 @@ namespace HangfireTest.Repositories
             //var now = DateTime.Now;
             //var filter = Builders<JobRequestEntity>.Filter.And(
             //    Builders<JobRequestEntity>.Filter.Eq(j => j.Status, status),
-            //    Builders<JobRequestEntity>.Filter.Lte(j => j.ScheduledTime, now)
+            //    Builders<JobRequestEntity>.Filter.Lte(j => j.NextScheduledTime, now)
             //);
             //return await _jobsCollection.Find(filter).ToListAsync();
         }
@@ -117,7 +124,7 @@ namespace HangfireTest.Repositories
         }
         public async Task ScheduleNextOccurrenceAsync(JobRequestEntity job)
         {
-            job.ScheduledTime = GetNextScheduledTime(job);
+            job.NextScheduledTime = GetNextScheduledTime(job);
             var filter = Builders<JobRequestEntity>.Filter.Eq(j => j.Id, job.Id);
             await _jobsCollection.ReplaceOneAsync(filter, job);
         }

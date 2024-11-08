@@ -18,7 +18,7 @@ namespace HangfireTest.Models
     //    public string? ExpectedAudioLanguage { get; set; }
     //    public List<string>? TranslationLanguages { get; set; }
     //    public string? Id { get; set; }
-    //    public DateTime? ScheduledTime { get; set; }
+    //    public DateTime? NextScheduledTime { get; set; }
     //}
 
     public enum InvocationType

@@ -161,7 +161,18 @@ public class Program
         // Register your XXXJobRepository
         builder.Services.AddSingleton<IXXXJobRepository, XXXJobRepository>();
 
+        builder.Services.AddCors(options =>
+        {
+            options.AddPolicy("CorsPolicy",
+                builder => builder.AllowAnyOrigin()
+                                  .AllowAnyMethod()
+                                  .AllowAnyHeader()
+                                  );
+        });
+
         var app = builder.Build();
+
+        app.UseCors(options => options.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
 
         app.Services.GetService<ICustomJobSchedulerService>();
 

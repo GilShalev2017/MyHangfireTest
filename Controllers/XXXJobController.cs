@@ -58,6 +58,13 @@ namespace HangfireTest.Controllers
             Logger.Debug(logMessage);
         }
 
+        [HttpGet]
+        public async Task<List<JobRequestEntity>> GetAllJobs()
+        {
+            var jobs = await _xxxJobService.GetAllJobsAsync();
+
+            return jobs;
+        }
 
         //[HttpGet("status/{jobId}")]
         //public async Task<IActionResult> GetJobStatus(string jobId)

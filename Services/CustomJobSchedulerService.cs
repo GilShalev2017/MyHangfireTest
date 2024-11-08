@@ -5,12 +5,14 @@ using MongoDB.Driver;
 using NLog;
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Threading.Tasks;
 
 namespace HangfireTest.Services
 {
     public interface ICustomJobSchedulerService
     {
         Task ScheduleJobAsync(JobRequestEntity jobRequest);
+        Task<List<JobRequestEntity>> GetAllJobsAsync();
     }
     public class CustomJobSchedulerService : ICustomJobSchedulerService
     {
@@ -28,7 +30,6 @@ namespace HangfireTest.Services
             _scheduledJobs = new ConcurrentDictionary<string, string>();
             RecoverInProgressJobs().GetAwaiter().GetResult(); // Recover any interrupted jobs
         }
-
         private async void CheckAndRunJobsAsync(object? state)
         {
             var jobs = await _jobsRepository.GetJobsByStatusAsync("Pending");
@@ -41,7 +42,7 @@ namespace HangfireTest.Services
                     continue;
                 }
 
-                TimeSpan? delay = job.ScheduledTime - DateTime.Now; // Calculate delay as a TimeSpan
+                TimeSpan? delay = job.NextScheduledTime - DateTime.Now; // Calculate delay as a TimeSpan
 
                 // Mark as "Pending" and start execution (immediate or delayed)
                 _scheduledJobs.TryAdd(job.Id!, "Pending");
@@ -95,19 +96,20 @@ namespace HangfireTest.Services
         {
             await _jobsRepository.UpdateJobStatusAsync(job, status);
         }
-
         private void ScheduleNextOccurrence(JobRequestEntity job)
         {
             // Calculate the next scheduled time based on job's recurrence pattern
-            //job.ScheduledTime = job.GetNextScheduledTime();
+            //job.NextScheduledTime = job.GetNextScheduledTime();
             //_jobsCollection.ReplaceOne(j => j.Id == job.Id, job);
         }
-
         public async Task ScheduleJobAsync(JobRequestEntity jobRequest)
         {
             await _jobsRepository.CreateJobAsync(jobRequest);
             CheckAndRunJobsAsync(null);
         }
-
+        public async Task<List<JobRequestEntity>> GetAllJobsAsync()
+        {
+            return await _jobsRepository.GetAllJobsAsync();
+        }
     }
 }

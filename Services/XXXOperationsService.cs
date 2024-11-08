@@ -112,16 +112,16 @@ namespace HangfireTest.Services
             }
             else if (jobRequest.IsRealTime)
             {
-                if (startTime < currentTime && endTime >= currentTime)
-                {
-                    // Part of the time range is in the past and part is in the future
-                    invocationType = InvocationType.Both;  // Process past & future
-                }
-                else if (startTime > currentTime)
-                {
+                //if (startTime < currentTime && endTime >= currentTime)
+                //{
+                //    // Part of the time range is in the past and part is in the future
+                //    invocationType = InvocationType.Both;  // Process past & future
+                //}
+                //else if (startTime > currentTime)
+                //{
                     // Entire time range is in the future, use RTProcessing
                     invocationType = InvocationType.RealTime;
-                }
+                //}
             }
             else
             {
@@ -273,7 +273,8 @@ namespace HangfireTest.Services
             Logger.Debug($"Starting real-time processing for Rule ID: {jobRequest.Id}");
 
             // Convert the endTime from string to DateTime and add 6 minutes
-            DateTime endTime = DateTime.ParseExact(jobRequest.BroadcastEndTime, "yyyy_MM_dd_HH_mm_ss", CultureInfo.InvariantCulture).AddMinutes(6);
+            //DateTime endTime = DateTime.ParseExact(jobRequest.BroadcastEndTime, "yyyy_MM_dd_HH_mm_ss", CultureInfo.InvariantCulture).AddMinutes(6);
+            DateTime endTime = DateTime.ParseExact(jobRequest.BroadcastEndTime, "yyyy_MM_dd_HH_mm_ss", CultureInfo.InvariantCulture).AddMinutes(1);
 
             List<FileSystemWatcher> watchers = new List<FileSystemWatcher>();
 
@@ -508,7 +509,11 @@ namespace HangfireTest.Services
         {
             Logger.Debug($"[TranscribeFileAsync] Starting transcription for: {audioFilePath} at {DateTime.Now}");
 
-            var insightResult = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.OpenAI, audioFilePath);
+            //OpenAI Transcriber
+            //var insightResult = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.OpenAI, audioFilePath);
+          
+            //Whisper Transcriber
+            var insightResult = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.Whisper, audioFilePath);
 
             await SaveInsightToFileAsync(insightResult!, sttFile);
 

@@ -1,12 +1,15 @@
 ﻿using HangfireTest.Models;
 using HangfireTest.Repositories;
 using System.Net;
+using System.Threading.Tasks;
 
 namespace HangfireTest.Services
 {
     public interface IXXXJobService
     {
         Task<JobResponse> ScheduleJobAsync(JobRequestEntity jobRequest);
+        Task <List<JobRequestEntity>> GetAllJobsAsync();
+
         //Task<JobRequestEntity> GetJobStatusAsync(string jobId);
         //Task RecoverUnfinishedJobsAsync();  // Recover jobs after system restart
         //Task ProcessExistingFilesAsync(BulkProcessRequest request);
@@ -30,6 +33,11 @@ namespace HangfireTest.Services
             await _customJobSchedulerService.ScheduleJobAsync(jobRequest);
             return new JobResponse { JobRequest = jobRequest, Status = "Success" };
         }
+        public async Task<List<JobRequestEntity>> GetAllJobsAsync()
+        {
+            return await _customJobSchedulerService.GetAllJobsAsync();
+        }
+
         //public async Task<JobRequestEntity> GetJobStatusAsync(string jobId)
         //{
         //    return await _jobRepository.GetJobStatusAsync(jobId);
