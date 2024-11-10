@@ -1,3 +1,6 @@
+using ActInfra.Security;
+using ActIntelligenceService.Domain.Models.AIClip;
+using ActIntelligenceService.Domain.Services;
 using Docker.DotNet.Models;
 using HangfireTest.Models;
 using HangfireTest.Repositories;
@@ -66,6 +69,17 @@ namespace HangfireTest.Controllers
             return jobs;
         }
 
+        [HttpDelete("{jobId}")]
+        public async Task<IActionResult> DeleteJob(string jobId)
+        {
+            //var actuser = ActUser.DecodeFromHeader(Request)!;
+            //await _aiClipManagerService.CheckACLOrThrowAsync(id, actuser, ACL.Rights.FullAccess);
+            //AIClipDm aiclip = await GetByIdAsync(id);
+            await _xxxJobService.DeleteJobAsync(jobId);
+            //_ = _activityLogConnector.WriteAsync(actuser, "AI Clip Deleted", $"Name: {aiclip.Name}");
+            return Ok();
+        }
+      
         //[HttpGet("status/{jobId}")]
         //public async Task<IActionResult> GetJobStatus(string jobId)
         //{

@@ -1,4 +1,5 @@
-﻿using GraphQL;
+﻿using ActIntelligenceService.Domain.Models.AIClip;
+using GraphQL;
 using HangfireTest.Models;
 using HangfireTest.Repositories;
 using MongoDB.Driver;
@@ -13,6 +14,7 @@ namespace HangfireTest.Services
     {
         Task ScheduleJobAsync(JobRequestEntity jobRequest);
         Task<List<JobRequestEntity>> GetAllJobsAsync();
+        Task DeleteJobAsync(string jobId);
     }
     public class CustomJobSchedulerService : ICustomJobSchedulerService
     {
@@ -110,6 +112,10 @@ namespace HangfireTest.Services
         public async Task<List<JobRequestEntity>> GetAllJobsAsync()
         {
             return await _jobsRepository.GetAllJobsAsync();
+        }
+        public async Task DeleteJobAsync(string jobId)
+        {
+            await _jobsRepository.DeleteJobAsync(jobId);
         }
     }
 }

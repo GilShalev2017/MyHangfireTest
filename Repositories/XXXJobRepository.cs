@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Http;
 using System.Globalization;
 using ActIntelligenceService.Domain.Models.AIClip;
+using System.Threading;
 
 namespace HangfireTest.Repositories
 {
@@ -22,6 +23,7 @@ namespace HangfireTest.Repositories
         public List<int> ChannelIds { get; set; } = new List<int>();
         public required string BroadcastStartTime { get; set; }
         public required string BroadcastEndTime { get; set; }
+        public Rule? RequestRule { get; set; }
         public List<string>? Keywords { get; set; } = new List<string>();
         public required List<string> Operations { get; set; } = new List<string>();
         public Dictionary<string, Dictionary<string, List<KeywordMatchSegment>>> ChannelOperationResults { get; set; } = new Dictionary<string, Dictionary<string, List<KeywordMatchSegment>>>();
@@ -40,6 +42,7 @@ namespace HangfireTest.Repositories
     public interface IXXXJobRepository
     {
         Task CreateJobAsync(JobRequestEntity jobRequest);
+        Task DeleteJobAsync(string jobId);
         Task<JobRequestEntity> GetJobStatusAsync(string jobId);
         Task<List<JobRequestEntity>> GetAllJobsAsync();
         Task<List<JobRequestEntity>> GetUnfinishedJobsAsync();
@@ -84,6 +87,7 @@ namespace HangfireTest.Repositories
                     ChannelIds = jobRequest.ChannelIds,
                     BroadcastStartTime = jobRequest.BroadcastStartTime,
                     BroadcastEndTime = jobRequest.BroadcastEndTime,
+                    RequestRule = jobRequest.RequestRule,
                     Keywords = jobRequest.Keywords,
                     Operations = jobRequest.Operations,
                     ExpectedAudioLanguage = jobRequest.ExpectedAudioLanguage,
@@ -151,7 +155,6 @@ namespace HangfireTest.Repositories
 
             await _jobsCollection.FindOneAndUpdateAsync(filter, update);
         }
-
         public async Task SaveOperationResultForChannel(string jobId, string channelName, string operationName, object segmentResult)
         {
             // Filter to find the job by its Id
@@ -166,6 +169,9 @@ namespace HangfireTest.Repositories
             // Use FindOneAndUpdateAsync to apply the update
             await _jobsCollection.FindOneAndUpdateAsync(filter, update);
         }
-
+        public async Task DeleteJobAsync(string jobId)
+        {
+            await _jobsCollection!.DeleteOneAsync(d => d.Id == jobId);
+        }
     }
 }

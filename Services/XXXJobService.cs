@@ -1,4 +1,6 @@
-﻿using HangfireTest.Models;
+﻿using ActIntelligenceService.Domain.Models.AIClip;
+using ActIntelligenceService.Infrastructure;
+using HangfireTest.Models;
 using HangfireTest.Repositories;
 using System.Net;
 using System.Threading.Tasks;
@@ -9,6 +11,7 @@ namespace HangfireTest.Services
     {
         Task<JobResponse> ScheduleJobAsync(JobRequestEntity jobRequest);
         Task <List<JobRequestEntity>> GetAllJobsAsync();
+        Task<bool> DeleteJobAsync(string jobId);
 
         //Task<JobRequestEntity> GetJobStatusAsync(string jobId);
         //Task RecoverUnfinishedJobsAsync();  // Recover jobs after system restart
@@ -36,6 +39,18 @@ namespace HangfireTest.Services
         public async Task<List<JobRequestEntity>> GetAllJobsAsync()
         {
             return await _customJobSchedulerService.GetAllJobsAsync();
+        }
+        public virtual async Task<bool> DeleteJobAsync(string jobId)
+        {
+            //AIClipDm aiclip = await _aiClipRepository.GetOneAsync(id);
+
+            //TODO - cancel all insights !!
+            //_ = Task.Run(() => { DeleteAiCLipFilesSafe(aiclip); });
+
+            //Delete from DB
+            await _customJobSchedulerService.DeleteJobAsync(jobId);
+
+            return true;
         }
 
         //public async Task<JobRequestEntity> GetJobStatusAsync(string jobId)
