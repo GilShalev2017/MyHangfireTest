@@ -21,6 +21,11 @@ using Microsoft.AspNetCore.Mvc;
 using HangfireTest.Repositories;
 using Hangfire;
 using Microsoft.Extensions.FileSystemGlobbing;
+using static ActInfra.Models.HLSSourceDm;
+using static ActIntelligenceService.Domain.Models.AIClip.AIClipDm;
+using System.Net.Http.Headers;
+using System.Net.Http;
+using Hangfire.Common;
 
 namespace HangfireTest.Services
 {
@@ -82,6 +87,8 @@ namespace HangfireTest.Services
         #region IXXXOperationsService
         public async Task ExecuteJobAsync(JobRequestEntity job)
         {
+            CreateJobClip(job);
+
             var invocationType = GetInvocationType(job);
 
             if (invocationType == InvocationType.Batch)
@@ -92,7 +99,7 @@ namespace HangfireTest.Services
             {
                 await MonitorAndProcessNewFiles(job);
             }
-            else if(invocationType == InvocationType.Both)
+            else if (invocationType == InvocationType.Both)
             {
                 await MixJobProcessing(job);
             }
@@ -121,8 +128,8 @@ namespace HangfireTest.Services
                 //}
                 //else if (startTime > currentTime)
                 //{
-                    // Entire time range is in the future, use RTProcessing
-                    invocationType = InvocationType.RealTime;
+                // Entire time range is in the future, use RTProcessing
+                invocationType = InvocationType.RealTime;
                 //}
             }
             else
@@ -513,7 +520,7 @@ namespace HangfireTest.Services
 
             //OpenAI Transcriber
             var insightResult = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.OpenAI, audioFilePath);
-          
+
             //Whisper Transcriber
             //var insightResult = await GetAudioBasedCaptionsTest(SystemInsightTypes.Transcription, ProviderType.Whisper, audioFilePath);
 
@@ -557,7 +564,7 @@ namespace HangfireTest.Services
                 if (keywordMatches.Count > 0)
                 {
                     string keywordFile = sttJsonFile.Replace(".json", "_keywords.json");
-                    await SaveKeywordMatchesAsync(channel, job,keywordFile, keywordMatches);
+                    await SaveKeywordMatchesAsync(channel, job, keywordFile, keywordMatches);
                 }
                 //foreach (var keywordMatch in keywordMatches)
                 //{
@@ -583,8 +590,8 @@ namespace HangfireTest.Services
         {
             try
             {
-                if(sttInsightResult.TimeCodedContent != null && sttInsightResult.TimeCodedContent.Count > 0)
-                { 
+                if (sttInsightResult.TimeCodedContent != null && sttInsightResult.TimeCodedContent.Count > 0)
+                {
                     string fileNameDate = Path.GetFileNameWithoutExtension(audioFilePath);
                     int firstSplitIndex = fileNameDate.IndexOf('_') + 1;
                     int lastSplitIndex = fileNameDate.LastIndexOf('_');
@@ -610,7 +617,7 @@ namespace HangfireTest.Services
                             //CCHelper is defined in ActCommon
                             //await CCHelper.WriteTxtResultAsync(ts.Text, destFileParse); //writing the translated sentence in a txt file
                             await WriteTxtResultAsync(ts.Text, destFileParse);
-                            
+
                             //Safe upload to Lucene <-IS THIS REALLY NEEDED?
                             /*
                             try
@@ -655,7 +662,7 @@ namespace HangfireTest.Services
         //{
         //    string subject = $"Actus Keyword Detection: Keyword(s) detected: {keywordMatch.Keyword}";
         //    string body = $"<b>Channel Name</b>: {channel} <br/> between start time: {keywordMatch.StartInSeconds} and end time {keywordMatch.EndInSeconds} {Environment.NewLine}";
-            
+
         //    GlobalNotificationSendDTO globalNotificationSendDTO = new();
         //    globalNotificationSendDTO.NotificationIds = new List<string>();
         //    globalNotificationSendDTO.NotificationIds.AddRange(["671e1b0cd24904b406041bbd"]);//NotificationIds
@@ -667,7 +674,7 @@ namespace HangfireTest.Services
         //    //string url = $"http://{_accountManagerHost}:{_accountManagerPort}/account/api/service/microservice";
         //    string url = $"http://localhost:8890/account/api/service/microservice";
         //    List<NotificationLogDm> rsp = await WebHelper.PostAsync<List<NotificationLogDm>>(url, globalNotificationSendDTO, null, _httpClient); //response sample: {"Id":"633409088c2e1d7e95e47c6f"}
-            
+
         //    _emailService.SendEmail("gilshalev@actusdigital.com", subject, body);
         //}
         private static async Task<List<KeywordMatch>> FindKeywordsAsync(InsightResult insightResult, List<string> keywords, string channelName, string fileName)
@@ -729,6 +736,8 @@ namespace HangfireTest.Services
 
             // Serialize the keyword matches list to JSON
             string jsonString = JsonSerializer.Serialize(keywordMatches, options);
+
+            await PublishKeywordNotificationAsync(jsonString);
 
             // Write the JSON string to a file
             await File.WriteAllTextAsync(filePath, jsonString);
@@ -899,8 +908,58 @@ namespace HangfireTest.Services
         }
         private static int GetChannelID(string channel)
         {
-            int channelID = Convert.ToInt32(channel.ToLower().Replace("channel",""));
+            int channelID = Convert.ToInt32(channel.ToLower().Replace("channel", ""));
             return channelID;
+        }
+        public async Task PublishKeywordNotificationAsync(string data)
+        {
+            //var notification = new NotificationMessage
+            //{
+            //    Keyword = "guerre",
+            //    StartInSeconds = 11,
+            //    EndInSeconds = 15
+            //};
+
+            await WebSocketHandler.SendNotificationAsync(data);
+        }
+
+        static public AiClipRequest CreateClipRequest(JobRequestEntity job)
+        {
+            AiClipRequest aiclipRequest = new AiClipRequest();
+
+            aiclipRequest.AIClipSource = AIClipSourceEnum.Proxy;
+
+            aiclipRequest.RequestRule = new();
+            //aiclipRequest.RequestRule.Recurrence = rec ? RuleRecurrenceEnum.Recurring : RuleRecurrenceEnum.Once;
+
+            if (aiclipRequest.AIClipSource == AIClipSourceEnum.Proxy)
+            {
+                aiclipRequest.ProxyMetadata = new AIClipProxyMetadata()
+                {
+                    ChannelIds = job.ChannelIds,
+                    From = DateTime.Now.AddMinutes(-10),//job.BroadcastStartTime
+                    To = DateTime.Now.AddMinutes(-9)//job.BroadcastEndTime
+                };
+            }
+
+            aiclipRequest.RequestName = job.Name;
+            aiclipRequest.Visibility = VisibilityEnum.Everyone;
+            aiclipRequest.Insights = new List<InsightRequest>();
+
+            return aiclipRequest;
+        }
+
+        public async static void CreateJobClip(JobRequestEntity job)
+        {
+            using var httpClient = new HttpClient();
+
+            httpClient.DefaultRequestHeaders.Add("actauth", "ActAuth eyJpZCI6MiwibmFtZSI6IkFkbWluaXN0cmF0b3IiLCJhY3R1c191c2VyX2dyb3VwX2lkIjowLCJpc19hZG1pbiI6dHJ1ZSwic2Vzc2lvbl9ndWlkIjoiNWIwYjU5YTItNTFjYi00ZjY2LTk5YzAtOTIzOTQyNzNjZjlmIiwiaW5fZGlyZWN0b3J5X3NlcnZpY2UiOmZhbHNlLCJhZF9ncm91cF9uYW1lIjpudWxsLCJzY29wZSI6IiIsIklkZW50aXR5IjpudWxsfSZYJlgmWC0xNjA2MTEwNzA3");
+            
+            var service = new AiClipRequestService(httpClient);
+
+            AiClipRequest request = CreateClipRequest(job);// 1, 0, VisibilityEnum.Everyone, AIClipSourceEnum.Proxy, "", false);
+
+            var clipId = await service.PostAiClipRequestAsync(request);
         }
     }
 }

@@ -24,6 +24,7 @@ using HangfireTest.Repositories;
 using MongoDB.Driver;
 using ActIntelligenceService.Connectors;
 using Microsoft.Extensions.DependencyInjection;
+using System.Net.WebSockets;
 
 public class Program
 {
@@ -172,10 +173,14 @@ public class Program
 
         var app = builder.Build();
 
-        app.UseCors(options => options.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
+        app.UseCors("CorsPolicy");
+        //app.UseCors(options => options.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
+
+        app.UseWebSockets();
 
         app.Services.GetService<ICustomJobSchedulerService>();
 
+       
         app.UseHangfireDashboard();
 
         app.UseHttpsRedirection();
@@ -185,6 +190,45 @@ public class Program
 
         app.MapControllers();
 
+        app.UseRouting();
+
+        app.UseEndpoints(endpoints =>
+        {
+            endpoints.MapControllers();
+            endpoints.Map("/ws", async context =>
+            {
+                if (context.WebSockets.IsWebSocketRequest)
+                {
+                    var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                    await WebSocketHandler.HandleWebSocketConnection(webSocket);
+                }
+                else
+                {
+                    context.Response.StatusCode = 400;
+                }
+            });
+        });
+
         return app;
     }
+
+    //private static async Task HandleWebSocketConnection(WebSocket webSocket)
+    //{
+    //    var buffer = new byte[1024 * 4];
+    //    WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+
+    //    while (!result.CloseStatus.HasValue)
+    //    {
+    //        string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+    //        Console.WriteLine("Received: " + message);
+
+    //        // Echo the message back to the client or send another response
+    //        var response = Encoding.UTF8.GetBytes("Server response: " + message);
+    //        await webSocket.SendAsync(new ArraySegment<byte>(response, 0, response.Length), result.MessageType, result.EndOfMessage, CancellationToken.None);
+
+    //        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+    //    }
+
+    //    await webSocket.CloseAsync(result.CloseStatus.Value, result.CloseStatusDescription, CancellationToken.None);
+    //}
 }
